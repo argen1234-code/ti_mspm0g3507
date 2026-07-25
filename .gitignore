@@ -33,3 +33,7 @@ settings/
 # IDE
 .vscode/
 .idea/
+
+# SysConfig 工具 (TI 官网可下载, 含超大二进制文件)
+sysconfig_1.20.0/
+sysconfig_1.21.1/

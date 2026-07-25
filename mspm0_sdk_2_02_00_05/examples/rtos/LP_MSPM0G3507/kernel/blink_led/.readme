@@ -1,55 +1,235 @@
 # MSPM0G3507 双路电机底盘控制工程
 
+基于 TI MSPM0G3507 (Cortex-M0+ 80MHz) + FreeRTOS 的双轮差速底盘控制程序，适配 **WHEELTEC C07A** 开发板。
+
+---
+
+## 目录
+
+- [工程入口](#工程入口)
+- [工程结构](#工程结构)
+- [环境要求](#环境要求)
+- [使用办法](#使用办法)
+- [串口监视](#串口监视)
+- [修改引脚配置](#修改引脚配置)
+- [推送更新](#推送更新)
+- [引脚分配](#引脚分配)
+
+---
+
 ## 工程入口
 
 ```
 C:\ti\mspm0_sdk_2_02_00_05\examples\rtos\LP_MSPM0G3507\kernel\blink_led\freertos\keil
 ```
 
-Keil 工程文件: `blink_led_LP_MSPM0G3507_freertos_keil.uvprojx`
+| 编译器 | 工程文件 |
+|--------|----------|
+| **Keil MDK** | `blink_led_LP_MSPM0G3507_freertos_keil.uvprojx` |
+| ARM GCC | `freertos/gcc/makefile` |
+| IAR | `freertos/iar/blink_led_LP_MSPM0G3507_freertos_iar.eww` |
+| TI CLANG | `freertos/ticlang/makefile` |
+
+---
+
+## 工程结构
+
+```
+blink_led/
+├── main.c                    # 程序入口: SYSCFG_DL_init() → main_blinky()
+├── main-blinky.c             # FreeRTOS 任务创建
+├── blink_led.syscfg          # SysConfig 引脚配置文件
+├── ti_msp_dl_config.c/h      # SysConfig 生成的硬件初始化 (DO NOT EDIT)
+├── 引脚分配.md                # 完整引脚分配表
+│
+├── bsp/                      # 板级驱动层
+│   ├── bsp_board.c/h         # 板级聚合 (LED/蜂鸣器/全局标志)
+│   ├── bsp_motor.c/h         # TB6612 电机驱动 (TIMA0 PWM)
+│   ├── bsp_encoder.c/h       # 编码器 (GPIO 四倍频)
+│   ├── bsp_oled.c/h          # SSD1306 OLED (软SPI)
+│   ├── bsp_oled_font.h       # 8×16 ASCII 字模
+│   ├── bsp_uart.c/h          # 4 路串口 (256B 环形缓冲)
+│   ├── bsp_key.c/h           # 5 向摇杆按键
+│   ├── bsp_track.c/h         # 8 路红外循迹
+│   ├── bsp_jy901s.c/h        # JY61P/JY901S 姿态传感器
+│   ├── bsp_i2c.c/h           # I2C 预留
+│   ├── bsp_spi.c/h           # SPI 预留 (原理图未使用)
+│   ├── bsp_servo.c/h         # 舵机预留 (原理图未使用)
+│   ├── bsp_can.c/h           # CAN 预留 (原理图未使用)
+│   └── bsp_bluetooth.c/h     # 蓝牙预留 (UART3 已分配给 IMU)
+│
+├── app/                      # 应用层
+│   ├── app_chassis.c/h       # 底盘控制任务 (100Hz)
+│   └── app_oled_task.c/h     # OLED 显示任务 (5Hz)
+│
+├── Algorithm/                 # 控制算法
+│   └── pid.c/h               # 位置式 PID 控制器
+│
+├── freertos/                  # FreeRTOS 内核
+│   ├── keil/                  # Keil 工程 + Objects 输出
+│   ├── gcc/                   # GCC 链接脚本 + startup
+│   ├── iar/                   # IAR 链接脚本 + startup
+│   └── ticlang/               # TI CLANG 链接脚本 + startup
+│
+└── serial_monitor.py          # Python 串口监视脚本
+```
+
+### FreeRTOS 任务
+
+| 任务 | 频率 | 优先级 | 栈大小 | 职责 |
+|------|------|--------|--------|------|
+| **ChassisBoardTask** | 100Hz | 最高 (+3) | 12×min | 编码器→PID→PWM 控制回路 |
+| **OledDisplayTask** | 5Hz | 中 (+2) | 2×min | SSD1306 显示刷新 |
+| **defaultTask** | — | 最低 (+1) | min | 空闲填充 |
+
+---
 
 ## 环境要求
 
-- **IDE:** Keil MDK-ARM (μVision) 5.38 或更高
-- **编译器:** ARMCLANG (AC6)
-- **器件包:** TI MSPM0 SDK 2.02.00.05
-- **硬件:** WHEELTEC C07A (MSPM0G3507, LQFP-64)
+| 组件 | 版本/型号 |
+|------|-----------|
+| **IDE** | Keil MDK-ARM 5.38+ |
+| **编译器** | ARMCLANG (AC6) |
+| **器件包** | TI MSPM0 SDK 2.02.00.05 |
+| **硬件** | WHEELTEC C07A (MSPM0G3507, LQFP-64) |
+| **调试器** | J-Link / DAP-Link / XDS110 |
+| **Git** | 任意版本 |
+
+---
 
 ## 使用办法
 
-### 1. 创建 C:\ti 文件夹并拉取代码
+### 1. 克隆仓库
+
+**重要:** 必须克隆到 `C:\ti` 目录，使路径与 SysConfig 生成的包含路径一致。
 
 ```powershell
+# 创建 C:\ti 目录
 mkdir C:\ti
+
+# 克隆仓库
 cd C:\ti
 git clone https://github.com/argen1234-code/ti_mspm0g3507.git .
 ```
 
-> 注意: clone 时加 `.` 表示直接检出到当前目录（C:\ti），保持路径结构与开发环境一致。
+> `clone` 末尾的 `.` 表示检出到当前目录，而不是创建子目录。
 
-### 2. 打开 Keil 工程
+### 2. 安装 Keil 器件包
 
-在文件资源管理器中进入工程入口目录，双击 `blink_led_LP_MSPM0G3507_freertos_keil.uvprojx`。
+确保 Keil MDK 已安装 **TI MSPM0** 系列器件包。如果没有：
 
-### 3. 编译
+1. 打开 Keil → **Pack Installer**
+2. 搜索 `MSPM0G3507`
+3. 安装 Texas Instruments → MSPM0 系列
 
-在 Keil 中点击 **Project → Build Target** (或按 `F7`)，等待编译完成。输出文件 `blink_led.hex` / `blink_led.axf` 生成在 `freertos\keil\Objects\` 目录。
+### 3. 打开工程
 
-### 4. 烧录与调试
+在文件资源管理器中进入工程入口目录，双击：
 
-使用 J-Link / DAP 调试器连接 WHEELTEC C07A 开发板，在 Keil 中点击 **Flash → Download** 烧录。
+```
+blink_led_LP_MSPM0G3507_freertos_keil.uvprojx
+```
+
+或者从 Keil 菜单: **Project → Open Project** → 选择该文件。
+
+### 4. 编译
+
+- **快捷键:** `F7` (Build)
+- **菜单:** Project → Build Target
+
+编译输出: `freertos\keil\Objects\blink_led.axf` (调试) 和 `blink_led.hex` (烧录)
+
+### 5. 烧录
+
+1. J-Link / DAP 调试器连接 WHEELTEC C07A 开发板
+2. Keil 菜单: **Flash → Download** (或 `F8`)
+3. 复位开发板，程序启动
+
+### 6. 验证
+
+上电后：
+
+- LED1/LED2/LED3 闪烁 2 次（初始化完成指示）
+- 串口 (UART0, PA10/PA11, 115200) 输出: `=== MSPM0 底盘启动 ===`
+- OLED 屏幕显示系统状态
+- 前 30 秒每秒输出 `MSPM0_ALIVE N` 心跳
+
+---
+
+## 串口监视
+
+### 调试串口 (UART0)
+
+| 参数 | 值 |
+|------|-----|
+| 引脚 | PA10 (TX), PA11 (RX) |
+| 波特率 | 115200 |
+| 数据位 | 8 |
+| 停止位 | 1 |
+| 校验 | 无 |
+
+### 使用 Python 脚本
+
+```powershell
+cd C:\ti\mspm0_sdk_2_02_00_05\examples\rtos\LP_MSPM0G3507\kernel\blink_led
+python serial_monitor.py
+```
+
+> 脚本自动搜索并连接 MSPM0 的 COM 口，需要 `pyserial` 库: `pip install pyserial`
+
+### 使用串口工具
+
+- **Putty:** 选择 Serial, 填入 COM 口和 115200
+- **VOFA+:** 添加串口，选择 firewater 协议可可视化 IMU 数据
+
+---
+
+## 修改引脚配置
+
+1. 安装 [SysConfig 1.21](https://www.ti.com/tool/SYSCONFIG)
+2. 双击打开 `blink_led.syscfg`
+3. 在图形界面中修改引脚映射
+4. 保存 → SysConfig 自动重新生成 `ti_msp_dl_config.c/h`
+5. 重新编译
+
+> ⚠️ `ti_msp_dl_config.c/h` 标注了 `DO NOT EDIT`，手动修改会被 SysConfig 覆盖。
+
+---
 
 ## 推送更新
 
 ```powershell
 cd C:\ti
 git add -A
-git commit -m "更新说明"
-git push origin main
+git commit -m "描述你的修改"
+git push origin master
 ```
 
-远程仓库: https://github.com/argen1234-code/ti_mspm0g3507.git
+> 注意: 默认分支是 `master`，不是 `main`。
+
+### 排除规则
+
+`.gitignore` 自动排除以下文件（不推送到远程）:
+
+- 编译产物: `*.o` `*.d` `*.elf` `*.hex` `*.bin`
+- Keil 中间文件: `Objects/` `Listings/` `DebugConfig/`
+- SysConfig 工具目录: `sysconfig_1.20.0/` `sysconfig_1.21.1/` (含超大二进制)
+
+---
 
 ## 引脚分配
 
 详见 [引脚分配.md](引脚分配.md)
+
+### 快速参考
+
+| 外设 | 引脚 |
+|------|------|
+| 左电机 PWM | PA28 (TIMA0 CCP3) |
+| 右电机 PWM | PB20 (TIMA0 CCP2) |
+| 左编码器 | PB23 (E1A), PB12 (E1B) |
+| 右编码器 | PB4 (E2A), PB5 (E2B) |
+| OLED | PA7 (SCL), PA8 (SDA), PB10 (RST), PB11 (DC) |
+| 调试串口 | PA10 (TX), PA11 (RX) |
+| IMU 串口 | PA26 (TX), PB13 (RX) |
+| 按键 | PA14(上) PB25(右) PB24(中) PA15(左) PA17(下) |
