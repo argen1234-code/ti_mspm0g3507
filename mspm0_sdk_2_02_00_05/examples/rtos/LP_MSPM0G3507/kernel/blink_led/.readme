@@ -1,0 +1,55 @@
+# MSPM0G3507 双路电机底盘控制工程
+
+## 工程入口
+
+```
+C:\ti\mspm0_sdk_2_02_00_05\examples\rtos\LP_MSPM0G3507\kernel\blink_led\freertos\keil
+```
+
+Keil 工程文件: `blink_led_LP_MSPM0G3507_freertos_keil.uvprojx`
+
+## 环境要求
+
+- **IDE:** Keil MDK-ARM (μVision) 5.38 或更高
+- **编译器:** ARMCLANG (AC6)
+- **器件包:** TI MSPM0 SDK 2.02.00.05
+- **硬件:** WHEELTEC C07A (MSPM0G3507, LQFP-64)
+
+## 使用办法
+
+### 1. 创建 C:\ti 文件夹并拉取代码
+
+```powershell
+mkdir C:\ti
+cd C:\ti
+git clone https://github.com/argen1234-code/ti_mspm0g3507.git .
+```
+
+> 注意: clone 时加 `.` 表示直接检出到当前目录（C:\ti），保持路径结构与开发环境一致。
+
+### 2. 打开 Keil 工程
+
+在文件资源管理器中进入工程入口目录，双击 `blink_led_LP_MSPM0G3507_freertos_keil.uvprojx`。
+
+### 3. 编译
+
+在 Keil 中点击 **Project → Build Target** (或按 `F7`)，等待编译完成。输出文件 `blink_led.hex` / `blink_led.axf` 生成在 `freertos\keil\Objects\` 目录。
+
+### 4. 烧录与调试
+
+使用 J-Link / DAP 调试器连接 WHEELTEC C07A 开发板，在 Keil 中点击 **Flash → Download** 烧录。
+
+## 推送更新
+
+```powershell
+cd C:\ti
+git add -A
+git commit -m "更新说明"
+git push origin main
+```
+
+远程仓库: https://github.com/argen1234-code/ti_mspm0g3507.git
+
+## 引脚分配
+
+详见 [引脚分配.md](引脚分配.md)

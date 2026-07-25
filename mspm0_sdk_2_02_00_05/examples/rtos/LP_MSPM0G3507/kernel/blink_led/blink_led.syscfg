@@ -1,0 +1,233 @@
+/**
+ * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
+ * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ */
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "C:\ti\mspm0_sdk_2_01_00_03\.metadata\product.json"
+// @cliArgs --rtos freertos
+
+/**
+ * Schematic source:
+ *   SCH_Schematic1_1-P1_2026-07-25.png
+ *
+ * C4~C7 share the same physical nets as ADC_read/AD2/AD1/AD0. The current
+ * firmware keeps the existing eight-channel digital tracking architecture,
+ * therefore those four pins are configured as GPIO inputs rather than ADC.
+ */
+const ProjectConfig = scripting.addModule("/ti/project_config/ProjectConfig");
+const GPIO = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1 = GPIO.addInstance();
+const GPIO2 = GPIO.addInstance();
+const GPIO3 = GPIO.addInstance();
+const GPIO4 = GPIO.addInstance();
+const GPIO5 = GPIO.addInstance();
+const GPIO6 = GPIO.addInstance();
+const GPIO7 = GPIO.addInstance();
+const GPIO8 = GPIO.addInstance();
+const PWM = scripting.addModule("/ti/driverlib/PWM", {}, false);
+const PWM1 = PWM.addInstance();
+const I2C = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C1 = I2C.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+const SYSTICK = scripting.addModule("/ti/driverlib/SYSTICK");
+const UART = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART0 = UART.addInstance();
+const UART1 = UART.addInstance();
+const UART2 = UART.addInstance();
+const UART3 = UART.addInstance();
+
+ProjectConfig.genDisable = true;
+
+/* TB6612 direction pins */
+GPIO1.$name = "AIN";
+GPIO1.associatedPins.create(2);
+GPIO1.associatedPins[0].$name = "AIN1";
+GPIO1.associatedPins[0].pin.$assign = "PA13";
+GPIO1.associatedPins[1].$name = "AIN2";
+GPIO1.associatedPins[1].pin.$assign = "PB26";
+
+GPIO2.$name = "BIN";
+GPIO2.associatedPins.create(2);
+GPIO2.associatedPins[0].$name = "BIN1";
+GPIO2.associatedPins[0].pin.$assign = "PB9";
+GPIO2.associatedPins[1].$name = "BIN2";
+GPIO2.associatedPins[1].pin.$assign = "PB7";
+
+/* Motor encoders: both phases use rising-edge GPIO interrupts */
+GPIO3.$name = "ENCODERA";
+GPIO3.associatedPins.create(2);
+GPIO3.associatedPins[0].$name = "E1A";
+GPIO3.associatedPins[0].direction = "INPUT";
+GPIO3.associatedPins[0].polarity = "RISE";
+GPIO3.associatedPins[0].interruptPriority = "0";
+GPIO3.associatedPins[0].interruptEn = true;
+GPIO3.associatedPins[0].pin.$assign = "PB23";
+GPIO3.associatedPins[1].$name = "E1B";
+GPIO3.associatedPins[1].direction = "INPUT";
+GPIO3.associatedPins[1].polarity = "RISE";
+GPIO3.associatedPins[1].interruptPriority = "0";
+GPIO3.associatedPins[1].interruptEn = true;
+GPIO3.associatedPins[1].pin.$assign = "PB12";
+
+GPIO4.$name = "ENCODERB";
+GPIO4.associatedPins.create(2);
+GPIO4.associatedPins[0].$name = "E2A";
+GPIO4.associatedPins[0].direction = "INPUT";
+GPIO4.associatedPins[0].polarity = "RISE";
+GPIO4.associatedPins[0].interruptPriority = "0";
+GPIO4.associatedPins[0].interruptEn = true;
+GPIO4.associatedPins[0].pin.$assign = "PB4";
+GPIO4.associatedPins[1].$name = "E2B";
+GPIO4.associatedPins[1].direction = "INPUT";
+GPIO4.associatedPins[1].polarity = "RISE";
+GPIO4.associatedPins[1].interruptPriority = "0";
+GPIO4.associatedPins[1].interruptEn = true;
+GPIO4.associatedPins[1].pin.$assign = "PB5";
+
+/* Five-way switch, active low */
+GPIO5.$name = "KEYS";
+GPIO5.associatedPins.create(5);
+GPIO5.associatedPins[0].$name = "KEY_UP";
+GPIO5.associatedPins[0].direction = "INPUT";
+GPIO5.associatedPins[0].internalResistor = "PULL_UP";
+GPIO5.associatedPins[0].pin.$assign = "PA14";
+GPIO5.associatedPins[1].$name = "KEY_RIGHT";
+GPIO5.associatedPins[1].direction = "INPUT";
+GPIO5.associatedPins[1].internalResistor = "PULL_UP";
+GPIO5.associatedPins[1].pin.$assign = "PB25";
+GPIO5.associatedPins[2].$name = "KEY_CENTER";
+GPIO5.associatedPins[2].direction = "INPUT";
+GPIO5.associatedPins[2].internalResistor = "PULL_UP";
+GPIO5.associatedPins[2].pin.$assign = "PB24";
+GPIO5.associatedPins[3].$name = "KEY_LEFT";
+GPIO5.associatedPins[3].direction = "INPUT";
+GPIO5.associatedPins[3].internalResistor = "PULL_UP";
+GPIO5.associatedPins[3].pin.$assign = "PA15";
+GPIO5.associatedPins[4].$name = "KEY_DOWN";
+GPIO5.associatedPins[4].direction = "INPUT";
+GPIO5.associatedPins[4].internalResistor = "PULL_UP";
+GPIO5.associatedPins[4].pin.$assign = "PA17";
+
+/* Eight-channel digital tracking connector */
+GPIO6.$name = "TRACK";
+GPIO6.associatedPins.create(7);
+GPIO6.associatedPins[0].$name = "C1";
+GPIO6.associatedPins[0].direction = "INPUT";
+GPIO6.associatedPins[0].internalResistor = "PULL_UP";
+GPIO6.associatedPins[0].pin.$assign = "PA31";
+GPIO6.associatedPins[1].$name = "C2";
+GPIO6.associatedPins[1].direction = "INPUT";
+GPIO6.associatedPins[1].internalResistor = "PULL_UP";
+GPIO6.associatedPins[1].pin.$assign = "PA12";
+GPIO6.associatedPins[2].$name = "C3";
+GPIO6.associatedPins[2].direction = "INPUT";
+GPIO6.associatedPins[2].internalResistor = "PULL_UP";
+GPIO6.associatedPins[2].pin.$assign = "PB8";
+GPIO6.associatedPins[3].$name = "C4";
+GPIO6.associatedPins[3].direction = "INPUT";
+GPIO6.associatedPins[3].internalResistor = "PULL_UP";
+GPIO6.associatedPins[3].pin.$assign = "PA27";
+GPIO6.associatedPins[4].$name = "C5";
+GPIO6.associatedPins[4].direction = "INPUT";
+GPIO6.associatedPins[4].internalResistor = "PULL_UP";
+GPIO6.associatedPins[4].pin.$assign = "PA30";
+/* C6 is PA1. SysConfig 1.21 does not expose PA1 for this package, so the
+ * BSP initializes IOMUX_PINCM2 directly after SYSCFG_DL_init(). */
+GPIO6.associatedPins[5].$name = "C7";
+GPIO6.associatedPins[5].direction = "INPUT";
+GPIO6.associatedPins[5].internalResistor = "PULL_UP";
+GPIO6.associatedPins[5].pin.$assign = "PB21";
+GPIO6.associatedPins[6].$name = "C8";
+GPIO6.associatedPins[6].direction = "INPUT";
+GPIO6.associatedPins[6].internalResistor = "PULL_UP";
+GPIO6.associatedPins[6].pin.$assign = "PB0";
+
+/* Schematic LEDs are active low (3V3 -> resistor -> LED -> MCU) */
+GPIO7.$name = "LEDS";
+GPIO7.associatedPins.create(3);
+GPIO7.associatedPins[0].$name = "LED1";
+GPIO7.associatedPins[0].initialValue = "SET";
+GPIO7.associatedPins[0].pin.$assign = "PB14";
+GPIO7.associatedPins[1].$name = "LED2";
+GPIO7.associatedPins[1].initialValue = "SET";
+GPIO7.associatedPins[1].pin.$assign = "PB18";
+GPIO7.associatedPins[2].$name = "LED3";
+GPIO7.associatedPins[2].initialValue = "SET";
+GPIO7.associatedPins[2].pin.$assign = "PA22";
+
+GPIO8.$name = "BUZZER_GPIO";
+GPIO8.associatedPins[0].$name = "BUZZER";
+GPIO8.associatedPins[0].pin.$assign = "PA21";
+
+/* TB6612 PWM: TIMA0 CCP3=PWMA(PA28), CCP2=PWMB(PB20) */
+PWM1.$name = "PWM_0";
+PWM1.timerStartTimer = true;
+PWM1.pwmMode = "EDGE_ALIGN_UP";
+PWM1.timerCount = 8000;
+PWM1.ccIndex = [2,3];
+PWM1.peripheral.$assign = "TIMA0";
+PWM1.peripheral.ccp2Pin.$assign = "PB20";
+PWM1.peripheral.ccp3Pin.$assign = "PA28";
+PWM1.PWM_CHANNEL_2.$name = "MOTOR_PWMB";
+PWM1.PWM_CHANNEL_3.$name = "MOTOR_PWMA";
+PWM1.ccp2PinConfig.$name = "GPIO_MOTOR_PWMB";
+PWM1.ccp3PinConfig.$name = "GPIO_MOTOR_PWMA";
+
+/* 0.96-inch OLED, SSD1306-compatible I2C interface */
+I2C1.$name = "OLED_I2C";
+I2C1.basicEnableController = true;
+I2C1.basicControllerBusSpeed = 400000;
+I2C1.advAnalogGlitchFilter = "DISABLED";
+I2C1.peripheral.$assign = "I2C1";
+I2C1.peripheral.sclPin.$assign = "PB2";
+I2C1.peripheral.sdaPin.$assign = "PB3";
+
+const divider7 = system.clockTree["PLL_PDIV"];
+divider7.divideValue = 2;
+const divider9 = system.clockTree["UDIV"];
+divider9.divideValue = 2;
+const gate7 = system.clockTree["MFCLKGATE"];
+gate7.enable = true;
+const multiplier2 = system.clockTree["PLL_QDIV"];
+multiplier2.multiplyValue = 5;
+const mux8 = system.clockTree["HSCLKMUX"];
+mux8.inputSelect = "HSCLKMUX_SYSPLL2X";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn = true;
+
+SYSTICK.periodEnable = true;
+SYSTICK.systickEnable = true;
+SYSTICK.period = 16777216;
+
+UART0.$name = "UART_0";
+UART0.profile = "CONFIG_PROFILE_1";
+UART0.peripheral.rxPin.$assign = "PA11";
+UART0.peripheral.txPin.$assign = "PA10";
+UART0.txPinConfig.$name = "GPIO_UART0_TX";
+UART0.rxPinConfig.$name = "GPIO_UART0_RX";
+
+UART1.$name = "UART_1";
+UART1.profile = "CONFIG_PROFILE_1";
+UART1.peripheral.rxPin.$assign = "PA9";
+UART1.peripheral.txPin.$assign = "PA8";
+UART1.txPinConfig.$name = "GPIO_UART1_TX";
+UART1.rxPinConfig.$name = "GPIO_UART1_RX";
+
+UART2.$name = "UART_2";
+UART2.profile = "CONFIG_PROFILE_1";
+UART2.peripheral.rxPin.$assign = "PB16";
+UART2.peripheral.txPin.$assign = "PB15";
+UART2.txPinConfig.$name = "GPIO_UART2_TX";
+UART2.rxPinConfig.$name = "GPIO_UART2_RX";
+
+UART3.$name = "UART_3";
+UART3.profile = "CONFIG_PROFILE_1";
+UART3.peripheral.rxPin.$assign = "PB13";
+UART3.peripheral.txPin.$assign = "PA26";
+UART3.txPinConfig.$name = "GPIO_UART3_TX";
+UART3.rxPinConfig.$name = "GPIO_UART3_RX";
+
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+/* Pinmux re-solved from scratch — remove this block to lock solution */

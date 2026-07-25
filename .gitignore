@@ -1,0 +1,35 @@
+# 编译产物
+*.o
+*.d
+*.elf
+*.hex
+*.crf
+*.lst
+*.bin
+*.out
+*.map
+*.iex
+*.axf
+
+# Keil MDK
+Objects/
+Listings/
+DebugConfig/
+JLinkLog.txt
+EventRecorderStub.scvd
+*.uvgui.*
+*.uvoptx
+
+# IAR
+Debug/
+Release/
+settings/
+
+# 临时文件
+*.bak
+*.tmp
+*.dep
+
+# IDE
+.vscode/
+.idea/

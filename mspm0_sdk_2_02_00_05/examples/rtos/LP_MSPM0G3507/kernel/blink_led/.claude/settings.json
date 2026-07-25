@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Arjen/Downloads/IMU/IMU/**)"
+    ]
+  }
+}
