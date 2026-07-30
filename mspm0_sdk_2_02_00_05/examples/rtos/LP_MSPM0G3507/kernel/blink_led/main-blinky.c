@@ -50,7 +50,7 @@
  * 关键数据流向:
  *   编码器 ──ISR──→ g_encoderA/B_cnt ──Task──→ motor[].speed ──PID──→ motor[].pwm_out
  *   IMU    ──UART3 ISR──→ RX buffer ──Task──→ chassis_move.imu ──显示/控制
- *   调试输出 ── Task ──→ debug_print() ──UART0 TX──→ 上位机
+ *   摄像头 ──UART0 RX(PA11)──→ bsp_camera_process() ──→ chassis_move.camera
  *****************************************************************************/
 
 /* Standard includes. */
@@ -66,18 +66,32 @@
 /* App includes */
 #include "app_chassis.h"
 #include "app_oled_task.h"
+#include "app_ZDT_task.h"
+#include "bsp_track.h"
 
 /*-----------------------------------------------------------*/
 
 /* 任务优先级 */
 #define DEFAULT_TASK_PRIORITY            (tskIDLE_PRIORITY + 1)
 #define OLED_TASK_PRIORITY               (tskIDLE_PRIORITY + 2)
+#define ZDT_TASK_PRIORITY                (tskIDLE_PRIORITY + 2)
 #define CHASSIS_TASK_PRIORITY            (tskIDLE_PRIORITY + 3)
 
 /* 任务栈大小 */
 #define DEFAULT_TASK_STACK_SIZE          configMINIMAL_STACK_SIZE
 #define OLED_TASK_STACK_SIZE             (configMINIMAL_STACK_SIZE * 2)
-#define CHASSIS_TASK_STACK_SIZE          (configMINIMAL_STACK_SIZE * 12)
+#define ZDT_TASK_STACK_SIZE              (configMINIMAL_STACK_SIZE * 2)
+#define CHASSIS_TASK_STACK_SIZE          (configMINIMAL_STACK_SIZE * 4)
+
+/* Keep PA31/C1 electrically disconnected while the tracking board powers up. */
+#define TRACK_C1_STARTUP_DELAY_MS         (3000U)
+
+/* Task creation diagnostics. pdPASS means allocation succeeded. */
+volatile BaseType_t g_chassis_task_create_result = pdFAIL;
+volatile BaseType_t g_zdt_task_create_result = pdFAIL;
+volatile BaseType_t g_oled_task_create_result = pdFAIL;
+volatile BaseType_t g_default_task_create_result = pdFAIL;
+volatile size_t g_free_heap_after_task_create = 0U;
 
 /*-----------------------------------------------------------*/
 
@@ -89,8 +103,15 @@ extern void main_blinky(void);
 
 void main_blinky(void)
 {
+    /*
+     * C1 startup ownership is independent from ChassisBoardTask.  This keeps
+     * the PA31 hardware workaround working even if a control task ever fails
+     * to start, and prevents UART/IMU initialization from delaying it.
+     */
+    bsp_track_init();
+
     /* 创建 defaultTask */
-    xTaskCreate(DefaultTask,
+    g_default_task_create_result = xTaskCreate(DefaultTask,
                 "defaultTask",
                 DEFAULT_TASK_STACK_SIZE,
                 NULL,
@@ -98,20 +119,28 @@ void main_blinky(void)
                 NULL);
 
     /* 创建 OLED 显示刷新任务 */
-    xTaskCreate(oled_display_task,
+    g_oled_task_create_result = xTaskCreate(oled_display_task,
                 "OledDisplayTask",
                 OLED_TASK_STACK_SIZE,
-                NULL,
+                &chassis_move,
                 OLED_TASK_PRIORITY,
                 NULL);
 
     /* 创建底盘控制任务 */
-    xTaskCreate(chassis_task,
+    g_zdt_task_create_result = xTaskCreate(zdt_motor_task,
+                "ZdtMotorTask",
+                ZDT_TASK_STACK_SIZE,
+                &chassis_move,
+                ZDT_TASK_PRIORITY,
+                NULL);
+
+    g_chassis_task_create_result = xTaskCreate(chassis_task,
                 "ChassisBoardTask",
                 CHASSIS_TASK_STACK_SIZE,
-                NULL,
+                &chassis_move,
                 CHASSIS_TASK_PRIORITY,
                 NULL);
+    g_free_heap_after_task_create = xPortGetFreeHeapSize();
 
     /* 启动调度器 */
     vTaskStartScheduler();
@@ -125,6 +154,9 @@ void main_blinky(void)
 static void DefaultTask(void *pvParameters)
 {
     (void)pvParameters;
+
+    vTaskDelay(pdMS_TO_TICKS(TRACK_C1_STARTUP_DELAY_MS));
+    bsp_track_enable_c1_pullup();
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1));

@@ -24,7 +24,10 @@
 #include "bsp_uart.h"
 #include "bsp_oled.h"
 #include "bsp_track.h"
+#include "bsp_yabo_IMU.h"
+#include "bsp_jy61s.h"
 #include "bsp_jy901s.h"
+#include "bsp_ZDT.h"
 #include "pid.h"
 
 #define ABS(a) ((a) > 0 ? (a) : -(a))

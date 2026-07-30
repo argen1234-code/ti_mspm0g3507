@@ -41,7 +41,6 @@
 #include "ti_msp_dl_config.h"
 
 DL_TimerA_backupConfig gPWM_0Backup;
-DL_UART_Main_backupConfig gUART_3Backup;
 
 /*
  *  ======== SYSCFG_DL_init ========
@@ -54,15 +53,16 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     /* Module-Specific Initializations*/
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_PWM_0_init();
+    SYSCFG_DL_ZDT_PULSE_TIMER_init();
     SYSCFG_DL_OLED_I2C_init();
     SYSCFG_DL_UART_0_init();
     SYSCFG_DL_UART_1_init();
     SYSCFG_DL_UART_2_init();
-    SYSCFG_DL_UART_3_init();
     SYSCFG_DL_SYSTICK_init();
     /* Ensure backup structures have no valid state */
 	gPWM_0Backup.backupRdy 	= false;
-	gUART_3Backup.backupRdy 	= false;
+
+
 
 }
 /*
@@ -74,7 +74,6 @@ SYSCONFIG_WEAK bool SYSCFG_DL_saveConfiguration(void)
     bool retStatus = true;
 
 	retStatus &= DL_TimerA_saveConfiguration(PWM_0_INST, &gPWM_0Backup);
-	retStatus &= DL_UART_Main_saveConfiguration(UART_3_INST, &gUART_3Backup);
 
     return retStatus;
 }
@@ -85,7 +84,6 @@ SYSCONFIG_WEAK bool SYSCFG_DL_restoreConfiguration(void)
     bool retStatus = true;
 
 	retStatus &= DL_TimerA_restoreConfiguration(PWM_0_INST, &gPWM_0Backup, false);
-	retStatus &= DL_UART_Main_restoreConfiguration(UART_3_INST, &gUART_3Backup);
 
     return retStatus;
 }
@@ -95,21 +93,21 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
     DL_TimerA_reset(PWM_0_INST);
+    DL_TimerG_reset(ZDT_PULSE_TIMER_INST);
     DL_I2C_reset(OLED_I2C_INST);
     DL_UART_Main_reset(UART_0_INST);
     DL_UART_Main_reset(UART_1_INST);
     DL_UART_Main_reset(UART_2_INST);
-    DL_UART_Main_reset(UART_3_INST);
 
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_TimerA_enablePower(PWM_0_INST);
+    DL_TimerG_enablePower(ZDT_PULSE_TIMER_INST);
     DL_I2C_enablePower(OLED_I2C_INST);
     DL_UART_Main_enablePower(UART_0_INST);
     DL_UART_Main_enablePower(UART_1_INST);
     DL_UART_Main_enablePower(UART_2_INST);
-    DL_UART_Main_enablePower(UART_3_INST);
 
     delay_cycles(POWER_STARTUP_DELAY);
 }
@@ -145,10 +143,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
         GPIO_UART_2_IOMUX_TX, GPIO_UART_2_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_UART_2_IOMUX_RX, GPIO_UART_2_IOMUX_RX_FUNC);
-    DL_GPIO_initPeripheralOutputFunction(
-        GPIO_UART_3_IOMUX_TX, GPIO_UART_3_IOMUX_TX_FUNC);
-    DL_GPIO_initPeripheralInputFunction(
-        GPIO_UART_3_IOMUX_RX, GPIO_UART_3_IOMUX_RX_FUNC);
 
     DL_GPIO_initDigitalOutput(BUZZER_GPIO_BUZZER_IOMUX);
 
@@ -196,10 +190,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
-    DL_GPIO_initDigitalInputFeatures(TRACK_C1_IOMUX,
-		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
-		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
-
     DL_GPIO_initDigitalInputFeatures(TRACK_C2_IOMUX,
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
@@ -216,6 +206,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
+    DL_GPIO_initDigitalInputFeatures(TRACK_C6_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
     DL_GPIO_initDigitalInputFeatures(TRACK_C7_IOMUX,
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
@@ -229,6 +223,18 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_initDigitalOutput(LEDS_LED2_IOMUX);
 
     DL_GPIO_initDigitalOutput(LEDS_LED3_IOMUX);
+
+    DL_GPIO_initDigitalInputFeatures(ZDT_GPIO_STEP_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
+    DL_GPIO_initDigitalInputFeatures(ZDT_GPIO_DIR_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
+    DL_GPIO_initDigitalInputFeatures(ZDT_GPIO_EN_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
     DL_GPIO_clearPins(GPIOA, BUZZER_GPIO_BUZZER_PIN |
 		AIN_AIN1_PIN);
@@ -347,6 +353,45 @@ SYSCONFIG_WEAK void SYSCFG_DL_PWM_0_init(void) {
 }
 
 
+
+/*
+ * Timer clock configuration to be sourced by BUSCLK /  (80000000 Hz)
+ * timerClkFreq = (timerClkSrc / (timerClkDivRatio * (timerClkPrescale + 1)))
+ *   80000000 Hz = 80000000 Hz / (1 * (0 + 1))
+ */
+static const DL_TimerG_ClockConfig gZDT_PULSE_TIMERClockConfig = {
+    .clockSel    = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
+    .prescale    = 0U,
+};
+
+/*
+ * Timer load value (where the counter starts from) is calculated as (timerPeriod * timerClockFreq) - 1
+ * ZDT_PULSE_TIMER_INST_LOAD_VALUE = (25 us * 80000000 Hz) - 1
+ */
+static const DL_TimerG_TimerConfig gZDT_PULSE_TIMERTimerConfig = {
+    .period     = ZDT_PULSE_TIMER_INST_LOAD_VALUE,
+    .timerMode  = DL_TIMER_TIMER_MODE_PERIODIC,
+    .startTimer = DL_TIMER_STOP,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_ZDT_PULSE_TIMER_init(void) {
+
+    DL_TimerG_setClockConfig(ZDT_PULSE_TIMER_INST,
+        (DL_TimerG_ClockConfig *) &gZDT_PULSE_TIMERClockConfig);
+
+    DL_TimerG_initTimerMode(ZDT_PULSE_TIMER_INST,
+        (DL_TimerG_TimerConfig *) &gZDT_PULSE_TIMERTimerConfig);
+    DL_TimerG_enableInterrupt(ZDT_PULSE_TIMER_INST , DL_TIMERG_INTERRUPT_ZERO_EVENT);
+    DL_TimerG_enableClock(ZDT_PULSE_TIMER_INST);
+
+
+
+
+
+}
+
+
 static const DL_I2C_ClockConfig gOLED_I2CClockConfig = {
     .clockSel = DL_I2C_CLOCK_BUSCLK,
     .divideRatio = DL_I2C_CLOCK_DIVIDE_1,
@@ -407,8 +452,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_0_init(void)
     DL_UART_Main_setRXFIFOThreshold(UART_0_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_setTXFIFOThreshold(UART_0_INST, DL_UART_TX_FIFO_LEVEL_1_2_EMPTY);
 
-    DL_UART_Main_enableLoopbackMode(UART_0_INST);
-
     DL_UART_Main_enable(UART_0_INST);
 }
 
@@ -444,8 +487,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_1_init(void)
     DL_UART_Main_enableFIFOs(UART_1_INST);
     DL_UART_Main_setRXFIFOThreshold(UART_1_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_setTXFIFOThreshold(UART_1_INST, DL_UART_TX_FIFO_LEVEL_1_2_EMPTY);
-
-    DL_UART_Main_enableLoopbackMode(UART_1_INST);
 
     DL_UART_Main_enable(UART_1_INST);
 }
@@ -483,47 +524,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_2_init(void)
     DL_UART_Main_setRXFIFOThreshold(UART_2_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_setTXFIFOThreshold(UART_2_INST, DL_UART_TX_FIFO_LEVEL_1_2_EMPTY);
 
-    DL_UART_Main_enableLoopbackMode(UART_2_INST);
-
     DL_UART_Main_enable(UART_2_INST);
-}
-
-static const DL_UART_Main_ClockConfig gUART_3ClockConfig = {
-    .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
-    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
-};
-
-static const DL_UART_Main_Config gUART_3Config = {
-    .mode        = DL_UART_MAIN_MODE_NORMAL,
-    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
-    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
-    .parity      = DL_UART_MAIN_PARITY_NONE,
-    .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
-    .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
-};
-
-SYSCONFIG_WEAK void SYSCFG_DL_UART_3_init(void)
-{
-    DL_UART_Main_setClockConfig(UART_3_INST, (DL_UART_Main_ClockConfig *) &gUART_3ClockConfig);
-
-    DL_UART_Main_init(UART_3_INST, (DL_UART_Main_Config *) &gUART_3Config);
-    /*
-     * Configure baud rate by setting oversampling and baud rate divisors.
-     *  Target baud rate: 115200
-     *  Actual baud rate: 115190.78
-     */
-    DL_UART_Main_setOversampling(UART_3_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(UART_3_INST, UART_3_IBRD_80_MHZ_115200_BAUD, UART_3_FBRD_80_MHZ_115200_BAUD);
-
-
-    /* Configure FIFOs */
-    DL_UART_Main_enableFIFOs(UART_3_INST);
-    DL_UART_Main_setRXFIFOThreshold(UART_3_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
-    DL_UART_Main_setTXFIFOThreshold(UART_3_INST, DL_UART_TX_FIFO_LEVEL_1_2_EMPTY);
-
-    DL_UART_Main_enableLoopbackMode(UART_3_INST);
-
-    DL_UART_Main_enable(UART_3_INST);
 }
 
 SYSCONFIG_WEAK void SYSCFG_DL_SYSTICK_init(void)

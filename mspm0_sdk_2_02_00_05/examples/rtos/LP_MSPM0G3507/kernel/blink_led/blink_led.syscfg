@@ -10,9 +10,12 @@
  * Schematic source:
  *   SCH_Schematic1_1-P1_2026-07-25.png
  *
- * C4~C7 share the same physical nets as ADC_read/AD2/AD1/AD0. The current
- * firmware keeps the existing eight-channel digital tracking architecture,
- * therefore those four pins are configured as GPIO inputs rather than ADC.
+ * The installed tracking module is wired from physical left to right as:
+ * PA31, PA12, PB8, PA27, PB0, PA30, PB21, PB10.
+ * All eight channels are active-low digital GPIO inputs. PA31/C1 is omitted
+ * from generated GPIO initialization so it remains in the reset-default,
+ * electrically disconnected state while the tracking module powers up.
+ * Firmware connects PA31 as a pull-up input after a 3-second startup delay.
  */
 const ProjectConfig = scripting.addModule("/ti/project_config/ProjectConfig");
 const GPIO = scripting.addModule("/ti/driverlib/GPIO", {}, false);
@@ -24,8 +27,11 @@ const GPIO5 = GPIO.addInstance();
 const GPIO6 = GPIO.addInstance();
 const GPIO7 = GPIO.addInstance();
 const GPIO8 = GPIO.addInstance();
+const GPIO9 = GPIO.addInstance();
 const PWM = scripting.addModule("/ti/driverlib/PWM", {}, false);
 const PWM1 = PWM.addInstance();
+const TIMER = scripting.addModule("/ti/driverlib/TIMER", {}, false);
+const TIMER1 = TIMER.addInstance();
 const I2C = scripting.addModule("/ti/driverlib/I2C", {}, false);
 const I2C1 = I2C.addInstance();
 const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
@@ -34,7 +40,6 @@ const UART = scripting.addModule("/ti/driverlib/UART", {}, false);
 const UART0 = UART.addInstance();
 const UART1 = UART.addInstance();
 const UART2 = UART.addInstance();
-const UART3 = UART.addInstance();
 
 ProjectConfig.genDisable = true;
 
@@ -111,28 +116,26 @@ GPIO5.associatedPins[4].pin.$assign = "PA17";
 /* Eight-channel digital tracking connector */
 GPIO6.$name = "TRACK";
 GPIO6.associatedPins.create(7);
-GPIO6.associatedPins[0].$name = "C1";
+GPIO6.associatedPins[0].$name = "C2";
 GPIO6.associatedPins[0].direction = "INPUT";
 GPIO6.associatedPins[0].internalResistor = "PULL_UP";
-GPIO6.associatedPins[0].pin.$assign = "PA31";
-GPIO6.associatedPins[1].$name = "C2";
+GPIO6.associatedPins[0].pin.$assign = "PA12";
+GPIO6.associatedPins[1].$name = "C3";
 GPIO6.associatedPins[1].direction = "INPUT";
 GPIO6.associatedPins[1].internalResistor = "PULL_UP";
-GPIO6.associatedPins[1].pin.$assign = "PA12";
-GPIO6.associatedPins[2].$name = "C3";
+GPIO6.associatedPins[1].pin.$assign = "PB8";
+GPIO6.associatedPins[2].$name = "C4";
 GPIO6.associatedPins[2].direction = "INPUT";
 GPIO6.associatedPins[2].internalResistor = "PULL_UP";
-GPIO6.associatedPins[2].pin.$assign = "PB8";
-GPIO6.associatedPins[3].$name = "C4";
+GPIO6.associatedPins[2].pin.$assign = "PA27";
+GPIO6.associatedPins[3].$name = "C5";
 GPIO6.associatedPins[3].direction = "INPUT";
 GPIO6.associatedPins[3].internalResistor = "PULL_UP";
-GPIO6.associatedPins[3].pin.$assign = "PA27";
-GPIO6.associatedPins[4].$name = "C5";
+GPIO6.associatedPins[3].pin.$assign = "PB0";
+GPIO6.associatedPins[4].$name = "C6";
 GPIO6.associatedPins[4].direction = "INPUT";
 GPIO6.associatedPins[4].internalResistor = "PULL_UP";
 GPIO6.associatedPins[4].pin.$assign = "PA30";
-/* C6 is PA1. SysConfig 1.21 does not expose PA1 for this package, so the
- * BSP initializes IOMUX_PINCM2 directly after SYSCFG_DL_init(). */
 GPIO6.associatedPins[5].$name = "C7";
 GPIO6.associatedPins[5].direction = "INPUT";
 GPIO6.associatedPins[5].internalResistor = "PULL_UP";
@@ -140,7 +143,7 @@ GPIO6.associatedPins[5].pin.$assign = "PB21";
 GPIO6.associatedPins[6].$name = "C8";
 GPIO6.associatedPins[6].direction = "INPUT";
 GPIO6.associatedPins[6].internalResistor = "PULL_UP";
-GPIO6.associatedPins[6].pin.$assign = "PB0";
+GPIO6.associatedPins[6].pin.$assign = "PB10";
 
 /* Schematic LEDs are active low (3V3 -> resistor -> LED -> MCU) */
 GPIO7.$name = "LEDS";
@@ -158,6 +161,27 @@ GPIO7.associatedPins[2].pin.$assign = "PA22";
 GPIO8.$name = "BUZZER_GPIO";
 GPIO8.associatedPins[0].$name = "BUZZER";
 GPIO8.associatedPins[0].pin.$assign = "PA21";
+
+/* ZDT_XS pulse-control interface: STEP=PA7, DIR=PA16, EN=PB17 */
+GPIO9.$name = "ZDT_GPIO";
+GPIO9.associatedPins.create(3);
+GPIO9.associatedPins[0].$name = "STEP";
+GPIO9.associatedPins[0].direction = "INPUT";
+GPIO9.associatedPins[0].pin.$assign = "PA7";
+GPIO9.associatedPins[1].$name = "DIR";
+GPIO9.associatedPins[1].direction = "INPUT";
+GPIO9.associatedPins[1].pin.$assign = "PA16";
+GPIO9.associatedPins[2].$name = "EN";
+GPIO9.associatedPins[2].direction = "INPUT";
+GPIO9.associatedPins[2].pin.$assign = "PB17";
+
+/* TIMG12 interrupt toggles STEP; the BSP changes the load value at runtime. */
+TIMER1.$name = "ZDT_PULSE_TIMER";
+TIMER1.timerPeriod = "25 us";
+TIMER1.timerMode = "PERIODIC";
+TIMER1.interrupts = ["ZERO"];
+TIMER1.timerClkPrescale = 1;
+TIMER1.peripheral.$assign = "TIMG12";
 
 /* TB6612 PWM: TIMA0 CCP3=PWMA(PA28), CCP2=PWMB(PB20) */
 PWM1.$name = "PWM_0";
@@ -202,6 +226,7 @@ SYSTICK.period = 16777216;
 
 UART0.$name = "UART_0";
 UART0.profile = "CONFIG_PROFILE_1";
+UART0.enableInternalLoopback = false;
 UART0.peripheral.rxPin.$assign = "PA11";
 UART0.peripheral.txPin.$assign = "PA10";
 UART0.txPinConfig.$name = "GPIO_UART0_TX";
@@ -209,6 +234,7 @@ UART0.rxPinConfig.$name = "GPIO_UART0_RX";
 
 UART1.$name = "UART_1";
 UART1.profile = "CONFIG_PROFILE_1";
+UART1.enableInternalLoopback = false;
 UART1.peripheral.rxPin.$assign = "PA9";
 UART1.peripheral.txPin.$assign = "PA8";
 UART1.txPinConfig.$name = "GPIO_UART1_TX";
@@ -216,17 +242,11 @@ UART1.rxPinConfig.$name = "GPIO_UART1_RX";
 
 UART2.$name = "UART_2";
 UART2.profile = "CONFIG_PROFILE_1";
+UART2.enableInternalLoopback = false;
 UART2.peripheral.rxPin.$assign = "PB16";
 UART2.peripheral.txPin.$assign = "PB15";
 UART2.txPinConfig.$name = "GPIO_UART2_TX";
 UART2.rxPinConfig.$name = "GPIO_UART2_RX";
-
-UART3.$name = "UART_3";
-UART3.profile = "CONFIG_PROFILE_1";
-UART3.peripheral.rxPin.$assign = "PB13";
-UART3.peripheral.txPin.$assign = "PA26";
-UART3.txPinConfig.$name = "GPIO_UART3_TX";
-UART3.rxPinConfig.$name = "GPIO_UART3_RX";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 

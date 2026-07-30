@@ -9,8 +9,11 @@
  *   chassis_feedback_update()
  *     │ δ = cnt - encoder_last → bsp_encoder_calc_rpm() → motor[].speed
  *     │
- *     │ UART3 ISR → JY901S RX buffer
- *     │ bsp_jy901s_process() → chassis_move.imu
+ *     │ UART3 ISR → JY61S RX buffer
+ *     │ bsp_jy61s_process() → chassis_move.imu
+ *     ▼
+ *   chassis_set_control()
+ *     │ 8路循迹位置 → 左右轮目标转速 / 脱线搜索 / 全0保护
  *     ▼
  *   chassis_control_loop()
  *     │ PID_Calculate(speed, speed_set) → motor[].pwm_out
@@ -24,10 +27,11 @@
  */
 
 #include "app_chassis.h"
+#include "app_ZDT_task.h"
 #include "bsp_encoder.h"
 #include "bsp_motor.h"
 #include "bsp_uart.h"
-#include "bsp_jy901s.h"
+#include "bsp_jy61s.h"
 #include "bsp_key.h"
 #include "bsp_track.h"
 #include "FreeRTOS.h"
@@ -49,7 +53,7 @@ volatile uint32_t chassis_step     = 0;    /* 启动阶段标记: 1=进入init, 
  *    2. PID 积分累加 ErrorInt → 0 (清除历史积分)
  *    3. PID 上次误差 Error1  → 0 (下次微分从零开始)
  *    4. PID 输出 Out         → 0 (归零)
- *  调用方: 当前未调用, 预留供上位机 STOP 指令或安全逻辑使用
+ *  调用方: 循迹全0保护或其他安全停车逻辑
  * ============================================================ */
 static void chassis_stop(chassis_move_t *chassis)
 {
@@ -58,9 +62,45 @@ static void chassis_stop(chassis_move_t *chassis)
 
     for (uint8_t i = 0; i < 2; i++) {
         chassis->motor[i].speed_pid.ErrorInt = 0.0f;
+        chassis->motor[i].speed_pid.Error0   = 0.0f;
         chassis->motor[i].speed_pid.Error1   = 0.0f;
+        chassis->motor[i].speed_pid.D_error  = 0.0f;
+        chassis->motor[i].speed_pid.Target   = 0.0f;
         chassis->motor[i].speed_pid.Out      = 0.0f;
+        chassis->motor[i].pwm_out            = 0;
     }
+}
+
+static float chassis_clampf(float value, float min_value, float max_value)
+{
+    if (value < min_value) return min_value;
+    if (value > max_value) return max_value;
+    return value;
+}
+
+static void chassis_pid_reset(PID_t *pid)
+{
+    if (pid == NULL) return;
+
+    pid->Target = 0.0f;
+    pid->Actual = 0.0f;
+    pid->Out = 0.0f;
+    pid->Error0 = 0.0f;
+    pid->Error1 = 0.0f;
+    pid->ErrorInt = 0.0f;
+    pid->D_error = 0.0f;
+}
+
+static void chassis_zdt_publish_position_target(chassis_move_t *chassis,
+                                                float target_degrees)
+{
+    if (chassis == NULL) return;
+
+    target_degrees = chassis_clampf(target_degrees,
+                                    APP_ZDT_ANGLE_LOWER_DEG,
+                                    APP_ZDT_ANGLE_UPPER_DEG);
+    chassis->zdt.position_target_degrees = target_degrees;
+    chassis->zdt.position_command_sequence++;
 }
 
 /* ============================================================
@@ -71,12 +111,17 @@ static void chassis_stop(chassis_move_t *chassis)
  *  初始化顺序:
  *    1. 编码器中断: bsp_encoder_init()
  *    2. 编码器指针绑定 + PID 初始化 (两路速度环)
- *    3. 四串口接口，其中 UART3 连接 JY61P/JY901S
- *    4. 五向按键与 8 路数字循迹接口
+ *    3. 四串口接口，其中 UART3 连接 JY61S/JY61P
+ *    4. 五向按键与 8 路数字循迹接口；PA31/C1 延迟 3 秒接入上拉
  *    5. IMU 数据结构清零
  * ============================================================ */
 static void chassis_init(chassis_move_t *chassis)
 {
+    const static float ball_position_pid_param[3] = {
+        BALL_POSITION_PID_KP,
+        BALL_POSITION_PID_KI,
+        BALL_POSITION_PID_KD
+    };
     const static float speed_pid_param[3] = {
         MOTOR_SPEED_PID_KP,   /* 200.0f 比例增益 */
         MOTOR_SPEED_PID_KI,   /*   3.0f 积分增益 */
@@ -84,18 +129,19 @@ static void chassis_init(chassis_move_t *chassis)
     };
 
     chassis->sample_time_ms = 10;   /* 100Hz */
-    chassis->mode = CAR_MODE_RUN;
+    chassis->mode = CAR_MODE_STOP;
 
     /* 编码器: 使能 GPIO 中断 → 指针绑定 → 历史清零 */
     bsp_encoder_init();
 
-    chassis->encoder_cnt[0] = &g_encoderA_cnt;  /* 左轮编码器 */
-    chassis->encoder_cnt[1] = &g_encoderB_cnt;  /* 右轮编码器 */
+    chassis->encoder_cnt[0] = &g_encoderB_cnt;  /* 实际左轮: 电机B / E2 */
+    chassis->encoder_cnt[1] = &g_encoderA_cnt;  /* 实际右轮: 电机A / E1 */
 
     chassis->encoder_last[0] = 0;               /* 首周期 δ 从零开始 */
     chassis->encoder_last[1] = 0;
 
-    chassis->flag_stop = &Flag_Stop;            /* 全局启停标志 */
+    Flag_Stop = 1;
+    chassis->flag_stop = &Flag_Stop;            /* 1=停止, 0=允许循迹 */
 
     /* 两路速度环 PID 初始化, 参数对称 */
     for (uint8_t i = 0; i < 2; i++) {
@@ -106,36 +152,62 @@ static void chassis_init(chassis_move_t *chassis)
                  MOTOR_SPEED_PID_MAX_IOUT); /* 积分限幅: ±1500 */
     }
 
-    /* 四个原理图串口接口 */
-    bsp_uart_init();
-    bsp_uart_port1_init();
-    bsp_uart_port2_init();
-    bsp_uart_jy901s_init();
-    bsp_jy901s_init(&chassis->imu);
-    bsp_key_init();
-    bsp_track_init();
+    /* 上电默认两轮停止，等待后续逻辑显式将 Flag_Stop 清零。 */
+    PID_init(&chassis->ball.position_pid,
+             PID_POSITION,
+             ball_position_pid_param,
+             BALL_POSITION_PID_MAX_OUT_DEG,
+             BALL_POSITION_PID_MAX_IOUT);
+    chassis->ball.target_position_cm = BALL_POSITION_TARGET_CM;
+    chassis->ball.position_error_cm = 0.0f;
+    chassis->ball.measured_position_cm = 0.0f;
+    chassis->ball.measured_velocity_cm_s = 0.0f;
+    chassis->ball.pid_output_degrees = 0.0f;
+    chassis->ball.velocity_damping_degrees = 0.0f;
+    chassis->ball.mechanical_compensation_degrees =
+        BALL_MECHANICAL_COMPENSATION_DEG;
+    chassis->ball.motor_neutral_degrees = 0.0f;
+    chassis->ball.motor_target_degrees = 0.0f;
+    chassis->ball.last_camera_sequence = chassis->camera.sequence;
+    chassis->ball.camera_stale_time_ms = BALL_CAMERA_TIMEOUT_MS;
+    chassis->ball.control_updates = 0U;
+    chassis->ball.enabled = true;
+    chassis->ball.camera_online = false;
+    chassis->ball.motor_neutral_captured = false;
 
-    debug_print("\r\n=== MSPM0 底盘启动 ===\r\n");
-    debug_print("UART0: 调试, PA.10/PA.11 @ 115200\r\n");
-    debug_print("UART1: PA.8/PA.9 @ 115200\r\n");
-    debug_print("UART2: PB.15/PB.16 @ 115200\r\n");
-    debug_print("UART3: JY61P/JY901S PA.26/PB.13 @ 115200\r\n");
-    debug_print("初始化完成, 串口监听中...\r\n\r\n");
+    chassis->zdt.position_control_enabled = false;
+    chassis->zdt.position_waiting_feedback = false;
+
+    chassis_stop(chassis);
+    bsp_motor_set_pwm(0, 0);
+
+    /* 四个原理图串口接口 */
+    bsp_camera_init(&chassis->camera);
+    bsp_uart_init();
+    /* UART1 is currently unused; leave its RX interrupt disabled. */
+    bsp_uart_port2_init();
+    bsp_uart_imu_init();
+    bsp_jy61s_init(&chassis->imu);
+    bsp_key_init();
+    /* UART0 is camera-only; no startup/debug text is transmitted. */
 }
 
 /* ============================================================
  *  chassis_mode_change — 运行模式切换 (预留)
  *
  *  功能: 响应上位机指令或按键, 在 STOP/RUN 等模式间切换。
- *  当前状态: 空实现, 保持 CAR_MODE_RUN 不变。
- *  预期扩展:
- *    - 读取 Flag_Stop 或串口指令
- *    - CAR_MODE_STOP → 调用 chassis_stop()
- *    - CAR_MODE_RUN   → 恢复 PID
+ *  Flag_Stop=1 时强制停车；Flag_Stop=0 时允许循迹逻辑决定运行状态。
  * ============================================================ */
 void chassis_mode_change(chassis_move_t *chassis)
 {
-    (void)chassis;
+    if ((chassis == NULL) || (chassis->flag_stop == NULL)) {
+        return;
+    }
+
+    if (*(chassis->flag_stop) != 0) {
+        chassis->mode = CAR_MODE_STOP;
+        chassis_stop(chassis);
+    }
 }
 
 /* ============================================================
@@ -145,8 +217,10 @@ void chassis_mode_change(chassis_move_t *chassis)
  *
  *  Part A — 编码器 → 转速 (两路对称):
  *    1. 读取 g_encoderA/B_cnt (原子读取 32-bit volatile, ISR 实时更新)
- *    2. 计算增量 δ = (cnt - encoder_last) * encoder_dir
- *       - 左轮 dir=+1, 右轮 dir=-1 (机械安装方向导致正反转定义相反)
+ *    2. 计算增量 δ = (cnt - encoder_last) * encoder_feedback_sign
+ *       - 实际左轮 B/E2: sign=-1
+ *       - 实际右轮 A/E1: sign=+1
+ *       使两路车轮物理向前时反馈速度均为正
  *    3. 保存 encoder_last = cnt (为本周期基准)
  *    4. bsp_encoder_calc_rpm(δ, 10ms):
  *       RPM = δ * 60000 / (编码器线数 * 倍频因子 * 减速比 * 采样时间)
@@ -155,7 +229,7 @@ void chassis_mode_change(chassis_move_t *chassis)
  *       避免编码器微小抖动被 PID 放大为 PWM 输出
  *
  *  Part B — IMU 数据解析:
- *    bsp_jy901s_process() 从 UART3 环形缓冲取字节并解析标准 0x55 帧,
+ *    bsp_jy61s_process() 从 UART3 环形缓冲取字节并解析标准 0x55 帧,
  *    直接填充 chassis->imu 的欧拉角/加速度/陀螺等字段。
  *    环形缓冲在 ISR 中填充, 此处为消费者。
  * ============================================================ */
@@ -163,13 +237,14 @@ void chassis_feedback_update(chassis_move_t *chassis)
 {
     if (chassis == NULL) return;
 
-    /* 左轮方向 = +1, 右轮方向 = -1 (机械安装对称反向) */
-    static const int8_t encoder_dir[2] = {1, -1};
+    /* [0]=实际左轮B/E2, [1]=实际右轮A/E1 */
+    static const int8_t encoder_feedback_sign[2] = {-1, 1};
 
     for (uint8_t i = 0; i < 2; i++) {
         /* 读取 ISR 更新的编码器计数 → 计算本周期增量 */
         int32_t cnt   = *(chassis->encoder_cnt[i]);
-        int32_t delta = (cnt - chassis->encoder_last[i]) * encoder_dir[i];
+        int32_t delta = (cnt - chassis->encoder_last[i]) *
+                        encoder_feedback_sign[i];
         chassis->encoder_last[i] = cnt;
 
         /* 增量 → RPM 转换 (含减速比和倍频) */
@@ -183,24 +258,216 @@ void chassis_feedback_update(chassis_move_t *chassis)
         }
     }
 
-    /* IMU 串口数据解析 (消费 UART1 环形缓冲) */
-    bsp_jy901s_process(&chassis->imu);
+    /* JY61S IMU 串口数据解析 (消费 UART3 环形缓冲) */
+    bsp_jy61s_process(&chassis->imu);
+    (void)bsp_camera_process(&chassis->camera);
     bsp_key_update();
+    chassis_ball_position_control(chassis);
 }
 
 /* ============================================================
- *  chassis_set_control — 控制量设置 (预留)
+ *  chassis_set_control — 八路数字循迹外环
  *
- *  功能: 根据上位机指令或自动策略, 设定双轮的目标转速。
- *  当前状态: 空实现, motor[].speed_set 保持初始值 0。
- *  预期扩展:
- *    - 解析串口协议帧 → 提取左右轮目标 RPM
- *    - 设置为 chassis->motor[i].speed_set
- *    - 或实现更复杂的运动学解算 (差速/阿克曼)
+ *  黑线为1、白底为0，位置误差范围约为 -350~+350：
+ *    error < 0: 黑线位于车体左侧，降低左轮、提高右轮
+ *    error > 0: 黑线位于车体右侧，提高左轮、降低右轮
+ *
+ *  脱线处理：
+ *    1. 短时全0：按最后一次偏离方向原地搜索
+ *    2. 连续全0达到 TRACK_LOST_PROTECT_MS：强制停止并清空速度PID
+ *    3. 再次检测到黑线：自动退出保护并恢复循迹
  * ============================================================ */
+/*
+ * Camera position outer loop. The 100 Hz chassis task consumes UART0 data,
+ * but recalculates only when a new valid camera frame changes sequence.
+ * Camera velocity adds physical damping without differentiating repeated
+ * position samples. The ZDT task consumes only the latest angle target.
+ */
+void chassis_ball_position_control(chassis_move_t *chassis)
+{
+    chassis_ball_control_t *ball;
+    uint32_t camera_sequence;
+
+    if (chassis == NULL) return;
+    ball = &chassis->ball;
+
+    if (!ball->enabled) {
+        ball->camera_online = false;
+        chassis_pid_reset(&ball->position_pid);
+        return;
+    }
+
+    if (!ball->motor_neutral_captured) {
+        if (chassis->zdt.uart_motor.feedback.encoder_absolute_valid) {
+            float current_degrees =
+                chassis->zdt.uart_motor.feedback.encoder_absolute_degrees;
+
+            /* The mechanism is assumed to be placed approximately level
+             * before power-on. Capture, but never move to, this live angle. */
+            if ((current_degrees >= APP_ZDT_ANGLE_LOWER_DEG) &&
+                (current_degrees <= APP_ZDT_ANGLE_UPPER_DEG)) {
+                ball->motor_neutral_degrees = current_degrees;
+                ball->motor_target_degrees = current_degrees;
+                ball->motor_neutral_captured = true;
+                chassis->zdt.position_control_enabled = true;
+                chassis_zdt_publish_position_target(chassis,
+                                                    current_degrees);
+            }
+        }
+        return;
+    }
+
+    camera_sequence = chassis->camera.sequence;
+    if (camera_sequence != ball->last_camera_sequence) {
+        float pid_output;
+        float correction_degrees;
+        float correction_min_degrees;
+        float correction_max_degrees;
+
+        ball->last_camera_sequence = camera_sequence;
+        ball->camera_stale_time_ms = 0U;
+        ball->camera_online = true;
+        ball->measured_position_cm = chassis_clampf(
+            chassis->camera.position_cm,
+            BSP_CAMERA_POSITION_MIN_CM,
+            BSP_CAMERA_POSITION_MAX_CM);
+        ball->measured_velocity_cm_s = chassis->camera.velocity_cm_s;
+        ball->position_error_cm = ball->target_position_cm -
+                                  ball->measured_position_cm;
+
+        pid_output = PID_Calculate(&ball->position_pid,
+                                   ball->measured_position_cm,
+                                   ball->target_position_cm);
+        ball->pid_output_degrees = pid_output;
+        ball->velocity_damping_degrees =
+            BALL_VELOCITY_DAMPING_DEG_PER_CM_S *
+            ball->measured_velocity_cm_s;
+
+        /* Conventional PID uses target-measured. Negating it makes a
+         * positive camera position command a positive motor correction. */
+        correction_degrees = BALL_CONTROL_DIRECTION_SIGN *
+            (-(pid_output + ball->mechanical_compensation_degrees) +
+             ball->velocity_damping_degrees);
+
+        /* Camera 0.0 cm is the only balance center. These two values merely
+         * convert the mechanical safety endpoints into allowable actuator
+         * corrections around the captured neutral reference. */
+        correction_min_degrees = APP_ZDT_ANGLE_LOWER_DEG -
+                                 ball->motor_neutral_degrees;
+        correction_max_degrees = APP_ZDT_ANGLE_UPPER_DEG -
+                                 ball->motor_neutral_degrees;
+        correction_degrees = chassis_clampf(
+            correction_degrees,
+            correction_min_degrees,
+            correction_max_degrees);
+
+        ball->motor_target_degrees = chassis_clampf(
+            ball->motor_neutral_degrees + correction_degrees,
+            APP_ZDT_ANGLE_LOWER_DEG,
+            APP_ZDT_ANGLE_UPPER_DEG);
+        ball->control_updates++;
+        chassis_zdt_publish_position_target(
+            chassis, ball->motor_target_degrees);
+        return;
+    }
+
+    if (ball->camera_stale_time_ms < BALL_CAMERA_TIMEOUT_MS) {
+        ball->camera_stale_time_ms += chassis->sample_time_ms;
+    }
+    if ((ball->camera_stale_time_ms >= BALL_CAMERA_TIMEOUT_MS) &&
+        ball->camera_online) {
+        /* Vision loss fails safe to the mechanical neutral angle. */
+        ball->camera_online = false;
+        ball->motor_target_degrees = ball->motor_neutral_degrees;
+        chassis_pid_reset(&ball->position_pid);
+        chassis_zdt_publish_position_target(
+            chassis, ball->motor_target_degrees);
+    }
+}
+
 void chassis_set_control(chassis_move_t *chassis)
 {
+    static int16_t last_error = 0;
+    static int8_t last_direction = 0;
+    static uint32_t lost_time_ms = 0U;
+    static bool line_was_visible = false;
+    static bool line_ever_seen = false;
+    bool valid = false;
+    int16_t error;
+
     if (chassis == NULL) return;
+
+    if ((chassis->flag_stop != NULL) &&
+        (*(chassis->flag_stop) != 0)) {
+        chassis->mode = CAR_MODE_STOP;
+        chassis_stop(chassis);
+        return;
+    }
+
+    error = bsp_track_line_position(&valid);
+
+    if (valid) {
+        float abs_error = (error < 0) ? (float) (-error) : (float) error;
+        float base_speed = TRACK_BASE_SPEED_RPM - abs_error * 0.02f;
+        float derivative = line_was_visible ? (float) (error - last_error) : 0.0f;
+        float correction = TRACK_STEER_KP * (float) error +
+                           TRACK_STEER_KD * derivative;
+
+        base_speed = chassis_clampf(base_speed,
+                                    TRACK_MIN_BASE_SPEED_RPM,
+                                    TRACK_BASE_SPEED_RPM);
+        correction = chassis_clampf(correction,
+                                    -TRACK_MAX_CORRECTION_RPM,
+                                     TRACK_MAX_CORRECTION_RPM);
+
+        chassis->motor[0].speed_set = chassis_clampf(
+            base_speed + correction,
+            -TRACK_MAX_WHEEL_SPEED_RPM,
+             TRACK_MAX_WHEEL_SPEED_RPM);
+        chassis->motor[1].speed_set = chassis_clampf(
+            base_speed - correction,
+            -TRACK_MAX_WHEEL_SPEED_RPM,
+             TRACK_MAX_WHEEL_SPEED_RPM);
+
+        if (error < -TRACK_DIRECTION_DEADBAND) {
+            last_direction = -1;
+        } else if (error > TRACK_DIRECTION_DEADBAND) {
+            last_direction = 1;
+        }
+
+        last_error = error;
+        lost_time_ms = 0U;
+        line_was_visible = true;
+        line_ever_seen = true;
+        chassis->mode = CAR_MODE_RUN;
+        return;
+    }
+
+    line_was_visible = false;
+    if (lost_time_ms < TRACK_LOST_PROTECT_MS) {
+        lost_time_ms += chassis->sample_time_ms;
+    }
+
+    if (line_ever_seen && (lost_time_ms < TRACK_LOST_PROTECT_MS)) {
+        int8_t recovery_direction = last_direction;
+
+        if (recovery_direction == 0) {
+            recovery_direction = (last_error < 0) ? -1 : 1;
+        }
+
+        chassis->mode = CAR_MODE_RUN;
+        if (recovery_direction < 0) {
+            chassis->motor[0].speed_set = -TRACK_RECOVERY_SPEED_RPM;
+            chassis->motor[1].speed_set =  TRACK_RECOVERY_SPEED_RPM;
+        } else {
+            chassis->motor[0].speed_set =  TRACK_RECOVERY_SPEED_RPM;
+            chassis->motor[1].speed_set = -TRACK_RECOVERY_SPEED_RPM;
+        }
+        return;
+    }
+
+    chassis->mode = CAR_MODE_STOP;
+    chassis_stop(chassis);
 }
 
 /* ============================================================
@@ -223,18 +490,24 @@ void chassis_control_loop(chassis_move_t *chassis)
 {
     if (chassis == NULL) return;
 
+    if (chassis->mode != CAR_MODE_RUN) {
+        chassis->motor[0].pwm_out = 0;
+        chassis->motor[1].pwm_out = 0;
+        return;
+    }
+
     for (uint8_t i = 0; i < 2; i++) {
         chassis->motor[i].pwm_out = (int32_t)PID_Calculate(
             &chassis->motor[i].speed_pid,
             chassis->motor[i].speed,     /* measured: 编码器反馈 RPM */
-            chassis->motor[i].speed_set); /* target:  目标 RPM (当前为 0) */
+            chassis->motor[i].speed_set); /* target: 循迹外环给出的目标 RPM */
     }
 }
 
 /* ============================================================
  *  chassis_send_cmd — 电机控制指令输出 (每周期调用)
  *
- *  功能: 将 PID 计算得到的占空比指令下发给电机驱动层。
+ *  功能: 按左右轮实际安装极性修正 PID 占空比后下发给电机驱动层。
  *
  *  实现:
  *    bsp_motor_set_pwm(pwmA, pwmB):
@@ -247,8 +520,14 @@ void chassis_send_cmd(chassis_move_t *chassis)
 {
     if (chassis == NULL) return;
 
-    bsp_motor_set_pwm(chassis->motor[0].pwm_out,   /* 左轮占空比 */
-                      chassis->motor[1].pwm_out);   /* 右轮占空比 */
+    if (chassis->mode != CAR_MODE_RUN) {
+        bsp_motor_set_pwm(0, 0);
+        return;
+    }
+
+    /* 电机A是实际右轮(正PWM前进)，电机B是实际左轮(负PWM前进) */
+    bsp_motor_set_pwm( chassis->motor[1].pwm_out,  /* 电机A / 实际右轮 */
+                     -chassis->motor[0].pwm_out); /* 电机B / 实际左轮 */
 }
 
 /* ============================================================
@@ -258,9 +537,7 @@ void chassis_send_cmd(chassis_move_t *chassis)
  *
  *  生命周期:
  *    1. chassis_init() — 一次性初始化 (编码器/PID/串口/IMU)
- *    2. 启动握手期 (前 30 秒):
- *       每 100 次主循环 (≈1秒) 通过 UART0 发送 "MSPM0_ALIVE N"
- *       供上位机确认下位机已启动
+ *    2. UART0持续接收摄像头位置、速度和校验数据
  *    3. 主循环 (永久):
  *       按固定顺序执行 5 个步骤:
  *         mode_change   → 模式切换 (预留)
@@ -275,38 +552,31 @@ void chassis_send_cmd(chassis_move_t *chassis)
  * ============================================================ */
 void chassis_task(void *pvParameters)
 {
-    (void)pvParameters;
+    chassis_move_t *chassis = (chassis_move_t *)pvParameters;
+
+    if (chassis == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
 
     chassis_step = 1;
-    chassis_init(&chassis_move);
+    chassis_init(chassis);
     chassis_step = 2;
-
-    /* 启动握手: 前 30 秒定期发送 alive 心跳 */
-    uint32_t startup_ticks = 0;
-    const  uint32_t HANDSHAKE_MAX_TICKS = pdMS_TO_TICKS(30000);
 
     while (1) {
         chassis_heartbeat++;
         chassis_step = 3;
 
-        /* 启动握手期间, 每 100 次循环 (≈1秒) 输出一次 alive */
-        if (startup_ticks < HANDSHAKE_MAX_TICKS) {
-            if ((chassis_heartbeat % 100) == 0) {
-                debug_print("MSPM0_ALIVE %lu\r\n", (unsigned long)chassis_heartbeat);
-            }
-        }
-
         /*
          * 控制流水线 5 步 (严格按序):
          *   传感器采集 → 目标设定 → PID计算 → 指令输出
          */
-        chassis_mode_change(&chassis_move);     /* 步骤1: 模式切换 */
-        chassis_feedback_update(&chassis_move); /* 步骤2: 传感器 → RPM + IMU */
-        chassis_set_control(&chassis_move);     /* 步骤3: 目标速度设定 */
-        chassis_control_loop(&chassis_move);    /* 步骤4: PID 速度环计算 */
-        chassis_send_cmd(&chassis_move);        /* 步骤5: PWM 输出到电机 */
+        chassis_mode_change(chassis);     /* 步骤1: 模式切换 */
+        chassis_feedback_update(chassis); /* 步骤2: 传感器 → RPM + IMU */
+        chassis_set_control(chassis);     /* 步骤3: 目标速度设定 */
+        chassis_control_loop(chassis);    /* 步骤4: PID 速度环计算 */
+        chassis_send_cmd(chassis);        /* 步骤5: PWM 输出到电机 */
 
         vTaskDelay(pdMS_TO_TICKS(10));          /* 精确 10ms 周期 */
-        startup_ticks += pdMS_TO_TICKS(10);
     }
 }

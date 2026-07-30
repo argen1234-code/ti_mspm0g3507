@@ -2,8 +2,9 @@
  * OLED 显示刷新任务 — 5Hz 只读显示
  *
  * 数据流向:
+ *   bsp_track_read()                    → OLED 第1行 (C1~C8)
  *   chassis_move (全局, 由 ChassisBoardTask 100Hz 更新)
- *     ├─ motor[0].speed / motor[1].speed → OLED 第2行 (双轮 RPM)
+ *     ├─ motor[0].speed / motor[1].speed → OLED 第2行 (左/右轮 RPM)
  *     ├─ imu.roll / imu.pitch            → OLED 第3行 (欧拉角)
  *     └─ imu.yaw                         → OLED 第4行 (偏航)
  *
@@ -15,38 +16,49 @@
 #include "app_oled_task.h"
 #include "app_chassis.h"
 #include "bsp_oled.h"
+#include "bsp_track.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
-
-extern chassis_move_t chassis_move;
 
 /* ============================================================
  *  OLED 刷新任务 (5Hz)
  * ============================================================ */
 void oled_display_task(void *pvParameters)
 {
-    (void)pvParameters;
+    const chassis_move_t *chassis =
+        (const chassis_move_t *)pvParameters;
+
+    if (chassis == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
 
     OLED_Init();
     OLED_Clear();
 
     while (1) {
-        if (chassis_move.mode == CAR_MODE_STOP) {
-            oled_printf(1, 1, "Mode: STOP     ");
-        } else {
-            oled_printf(1, 1, "Mode: RUN      ");
-        }
+        uint8_t track = bsp_track_read();
 
-        oled_printf(2, 1, "A:%5.1f B:%5.1f",
-                    (double)chassis_move.motor[0].speed,
-                    (double)chassis_move.motor[1].speed);
+        oled_printf(1, 1, "TRK:%u%u%u%u%u%u%u%u    ",
+                    (unsigned int) ((track >> 0U) & 1U),
+                    (unsigned int) ((track >> 1U) & 1U),
+                    (unsigned int) ((track >> 2U) & 1U),
+                    (unsigned int) ((track >> 3U) & 1U),
+                    (unsigned int) ((track >> 4U) & 1U),
+                    (unsigned int) ((track >> 5U) & 1U),
+                    (unsigned int) ((track >> 6U) & 1U),
+                    (unsigned int) ((track >> 7U) & 1U));
+
+        oled_printf(2, 1, "L:%5.1f R:%5.1f",
+                    (double)chassis->motor[0].speed,
+                    (double)chassis->motor[1].speed);
 
         oled_printf(3, 1, "R:%4.1f P:%4.1f",
-                    (double)chassis_move.imu.roll,
-                    (double)chassis_move.imu.pitch);
+                    (double)chassis->imu.roll,
+                    (double)chassis->imu.pitch);
         oled_printf(4, 1, "Y:%5.1f",
-                    (double)chassis_move.imu.yaw);
+                    (double)chassis->imu.yaw);
 
         vTaskDelay(pdMS_TO_TICKS(200));
     }

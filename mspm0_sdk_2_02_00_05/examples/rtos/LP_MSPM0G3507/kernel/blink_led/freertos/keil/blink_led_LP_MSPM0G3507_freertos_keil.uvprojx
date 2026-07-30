@@ -500,14 +500,14 @@
               <FilePath>..\..\bsp\bsp_jy901s.h</FilePath>
             </File>
             <File>
-              <FileName>bsp_can.c</FileName>
+              <FileName>bsp_jy61s.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\bsp\bsp_can.c</FilePath>
+              <FilePath>..\..\bsp\bsp_jy61s.c</FilePath>
             </File>
             <File>
-              <FileName>bsp_can.h</FileName>
+              <FileName>bsp_jy61s.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\bsp\bsp_can.h</FilePath>
+              <FilePath>..\..\bsp\bsp_jy61s.h</FilePath>
             </File>
             <File>
               <FileName>bsp_bluetooth.c</FileName>
@@ -559,6 +559,16 @@
               <FileType>5</FileType>
               <FilePath>..\..\bsp\bsp_track.h</FilePath>
             </File>
+            <File>
+              <FileName>bsp_ZDT.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\bsp\bsp_ZDT.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_ZDT.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\bsp\bsp_ZDT.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -598,6 +608,16 @@
               <FileName>app_oled_task.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\app\app_oled_task.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_ZDT_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\app\app_ZDT_task.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ZDT_task.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\app\app_ZDT_task.h</FilePath>
             </File>
           </Files>
         </Group>

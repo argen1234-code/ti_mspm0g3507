@@ -15,7 +15,7 @@ SYSCFG_H_FILES = $(filter %.h,$(SYSCFG_FILES))
 SYSCFG_OPT_FILES = $(filter %.opt,$(SYSCFG_FILES))
 
 OBJECTS = main.obj main-blinky.obj pid.obj app_chassis.obj app_oled_task.obj \
-    bsp_board.obj bsp_bluetooth.obj bsp_can.obj bsp_encoder.obj bsp_i2c.obj bsp_key.obj \
+    bsp_board.obj bsp_bluetooth.obj bsp_encoder.obj bsp_i2c.obj bsp_key.obj \
     bsp_motor.obj bsp_oled.obj bsp_servo.obj bsp_spi.obj bsp_track.obj bsp_uart.obj bsp_yabo_IMU.obj \
     freertos_gcc_startup_mspm0g350x_gcc.obj $(patsubst %.c,%.obj,$(notdir $(SYSCFG_C_FILES)))
 NAME = blink_led
