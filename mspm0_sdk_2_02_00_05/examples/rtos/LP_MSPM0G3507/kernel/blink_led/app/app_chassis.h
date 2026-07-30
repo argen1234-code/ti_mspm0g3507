@@ -30,15 +30,15 @@
 /* ---- Camera ball-position loop (UART0, -12.5 cm .. +12.5 cm) ---- */
 /* The only ball-balance center is the camera's 0.0 cm position. */
 #define BALL_POSITION_TARGET_CM                (0.0f)
-#define BALL_POSITION_PID_KP                   (2.10f)
+#define BALL_POSITION_PID_KP                   (2.20f)
 #define BALL_POSITION_PID_KI                   (0.00f)
-#define BALL_POSITION_PID_KD                   (0.00f)
+#define BALL_POSITION_PID_KD                   (2.80f)
 #define BALL_POSITION_PID_MAX_OUT_DEG          \
     (APP_ZDT_ANGLE_UPPER_DEG - APP_ZDT_ANGLE_LOWER_DEG)
 #define BALL_POSITION_PID_MAX_IOUT             (100.0f)
-#define BALL_VELOCITY_DAMPING_DEG_PER_CM_S     (0.10f)
+#define BALL_VELOCITY_DAMPING_DEG_PER_CM_S     (0.00f)
 /* Added on the PID side; -2.0 deg produces the verified +2.0 deg motor trim. */
-#define BALL_MECHANICAL_COMPENSATION_DEG        (-1.5f)
+#define BALL_MECHANICAL_COMPENSATION_DEG        (-0.0f)
 #define BALL_CAMERA_TIMEOUT_MS                 (300U)
 
 /* Reverse this sign if the first hardware test drives the ball away. */

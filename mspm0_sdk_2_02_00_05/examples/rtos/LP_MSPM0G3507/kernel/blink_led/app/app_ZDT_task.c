@@ -654,8 +654,8 @@ void zdt_motor_task(void *pvParameters)
                 zdt->motion_result = app_zdt_uart_move_to_angle(
                     &zdt->uart_motor,
                     requested_target,
-                    APP_ZDT_SWEEP_SPEED_RPM,
-                    APP_ZDT_SWEEP_ACCELERATION);
+                    APP_ZDT_BALANCE_SPEED_RPM,
+                    APP_ZDT_BALANCE_ACCELERATION);
 
                 if (zdt->motion_result == ZDT_RESULT_OK) {
                     zdt->position_applied_sequence =
