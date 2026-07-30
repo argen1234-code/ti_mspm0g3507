@@ -40,6 +40,8 @@ const UART = scripting.addModule("/ti/driverlib/UART", {}, false);
 const UART0 = UART.addInstance();
 const UART1 = UART.addInstance();
 const UART2 = UART.addInstance();
+const WWDT = scripting.addModule("/ti/driverlib/WWDT", {}, false);
+const WWDT1 = WWDT.addInstance();
 
 ProjectConfig.genDisable = true;
 
@@ -247,6 +249,23 @@ UART2.peripheral.rxPin.$assign = "PB16";
 UART2.peripheral.txPin.$assign = "PB15";
 UART2.txPinConfig.$name = "GPIO_UART2_TX";
 UART2.rxPinConfig.$name = "GPIO_UART2_RX";
+
+/*
+ * RTOS health watchdog: 32.768 kHz LFCLK / 4, 2^15 counts = 4 seconds.
+ * The reset window is fully open so the system monitor may feed it whenever
+ * the chassis, OLED and ZDT task heartbeats have all advanced.
+ */
+WWDT1.$name = "WWDT0";
+WWDT1.profile = "CUSTOM";
+WWDT1.clockDivider = "4";
+WWDT1.wwdtMode = "WATCHDOG";
+WWDT1.periodCount = "15";
+WWDT1.activeWindow = "0";
+WWDT1.window0ClosedPeriod = "0";
+WWDT1.window1ClosedPeriod = "0";
+WWDT1.sleepMode = true;
+WWDT1.enabledInterrupts = false;
+WWDT1.peripheral.$assign = "WWDT0";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 

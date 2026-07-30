@@ -15,38 +15,11 @@ int Flag_Stop = 1;
 
 void bsp_board_led_set(uint8_t led, bool on)
 {
-    GPIO_Regs *port;
-    uint32_t pin;
-
-    switch (led) {
-    case 1U:
-        port = LEDS_LED1_PORT;
-        pin = LEDS_LED1_PIN;
-        break;
-    case 2U:
-        port = LEDS_LED2_PORT;
-        pin = LEDS_LED2_PIN;
-        break;
-    case 3U:
-        port = LEDS_LED3_PORT;
-        pin = LEDS_LED3_PIN;
-        break;
-    default:
-        return;
-    }
-
-    if (on) {
-        DL_GPIO_clearPins(port, pin);
-    } else {
-        DL_GPIO_setPins(port, pin);
-    }
+    if ((led < 1U) || (led > 3U)) return;
+    bsp_led_set((bsp_led_id_t) (led - 1U), on);
 }
 
 void bsp_board_buzzer_set(bool on)
 {
-    if (on) {
-        DL_GPIO_setPins(BUZZER_GPIO_PORT, BUZZER_GPIO_BUZZER_PIN);
-    } else {
-        DL_GPIO_clearPins(BUZZER_GPIO_PORT, BUZZER_GPIO_BUZZER_PIN);
-    }
+    bsp_buzzer_set(on);
 }

@@ -32,7 +32,9 @@
 #include "bsp_motor.h"
 #include "bsp_uart.h"
 #include "bsp_jy61s.h"
+#include "bsp_buzzer.h"
 #include "bsp_key.h"
+#include "bsp_led.h"
 #include "bsp_track.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -158,6 +160,7 @@ static void chassis_init(chassis_move_t *chassis)
 
     chassis->sample_time_ms = 10;   /* 100Hz */
     chassis->mode = CAR_MODE_STOP;
+    app_task_state_machine_init(&chassis->task_state);
 
     /* 编码器: 使能 GPIO 中断 → 指针绑定 → 历史清零 */
     bsp_encoder_init();
@@ -220,23 +223,34 @@ static void chassis_init(chassis_move_t *chassis)
     bsp_uart_port2_init();
     bsp_uart_imu_init();
     bsp_jy61s_init(&chassis->imu);
+    bsp_buzzer_init();
+    bsp_led_init();
     bsp_key_init();
     /* UART0 is camera-only; no startup/debug text is transmitted. */
 }
 
 /* ============================================================
- *  chassis_mode_change — 运行模式切换 (预留)
+ *  chassis_task_change - non-blocking key scan and task selection
  *
  *  功能: 响应上位机指令或按键, 在 STOP/RUN 等模式间切换。
  *  Flag_Stop=1 时强制停车；Flag_Stop=0 时允许循迹逻辑决定运行状态。
  * ============================================================ */
-void chassis_mode_change(chassis_move_t *chassis)
+void chassis_task_change(chassis_move_t *chassis)
 {
     if ((chassis == NULL) || (chassis->flag_stop == NULL)) {
         return;
     }
 
-    if (*(chassis->flag_stop) != 0) {
+    bsp_key_update();
+    if (app_task_state_machine_update(
+            &chassis->task_state,
+            bsp_key_is_pressed(BSP_KEY_FRONT),
+            chassis->sample_time_ms)) {
+        *(chassis->flag_stop) = 0;
+    }
+
+    if ((*(chassis->flag_stop) != 0) ||
+        (chassis->task_state.state != APP_TASK_STATE_TASK1_TRACKING)) {
         chassis->mode = CAR_MODE_STOP;
         chassis_stop(chassis);
     }
@@ -293,8 +307,22 @@ void chassis_feedback_update(chassis_move_t *chassis)
     /* JY61S IMU 串口数据解析 (消费 UART3 环形缓冲) */
     bsp_jy61s_process(&chassis->imu);
     (void)bsp_camera_process(&chassis->camera);
-    bsp_key_update();
     chassis_ball_position_control(chassis);
+}
+
+void chassis_task1_finish(chassis_move_t *chassis)
+{
+    if ((chassis == NULL) ||
+        !app_task_state_machine_finish_task1(&chassis->task_state)) {
+        return;
+    }
+
+    if (chassis->flag_stop != NULL) {
+        *(chassis->flag_stop) = 1;
+    }
+    chassis->mode = CAR_MODE_STOP;
+    chassis_stop(chassis);
+    bsp_motor_set_pwm(0, 0);
 }
 
 /* ============================================================
@@ -518,6 +546,18 @@ void chassis_set_control(chassis_move_t *chassis)
 
     if (chassis == NULL) return;
 
+    switch (chassis->task_state.state) {
+    case APP_TASK_STATE_TASK1_TRACKING:
+        /* Task 1 uses the existing eight-channel line-tracking controller. */
+        break;
+    case APP_TASK_STATE_IDLE:
+    case APP_TASK_STATE_TASK1_FINISHED:
+    default:
+        chassis->mode = CAR_MODE_STOP;
+        chassis_stop(chassis);
+        return;
+    }
+
     if ((chassis->flag_stop != NULL) &&
         (*(chassis->flag_stop) != 0)) {
         chassis->mode = CAR_MODE_STOP;
@@ -661,7 +701,7 @@ void chassis_send_cmd(chassis_move_t *chassis)
  *    2. UART0持续接收摄像头位置、速度和校验数据
  *    3. 主循环 (永久):
  *       按固定顺序执行 5 个步骤:
- *         mode_change   → 模式切换 (预留)
+ *         task_change   → 非阻塞按键扫描与任务切换
  *         feedback      → 传感器采集 (编码器+IMU)
  *         set_control   → 目标速度设定 (预留)
  *         control_loop  → PID 计算 (速度环)
@@ -686,13 +726,15 @@ void chassis_task(void *pvParameters)
 
     while (1) {
         chassis_heartbeat++;
+        app_watchdog_task_heartbeat(&chassis->watchdog,
+                                    APP_WATCHDOG_TASK_CHASSIS);
         chassis_step = 3;
 
         /*
          * 控制流水线 5 步 (严格按序):
          *   传感器采集 → 目标设定 → PID计算 → 指令输出
          */
-        chassis_mode_change(chassis);     /* 步骤1: 模式切换 */
+        chassis_task_change(chassis);     /* 步骤1: 按键扫描与任务切换 */
         chassis_feedback_update(chassis); /* 步骤2: 传感器 → RPM + IMU */
         chassis_set_control(chassis);     /* 步骤3: 目标速度设定 */
         chassis_control_loop(chassis);    /* 步骤4: PID 速度环计算 */

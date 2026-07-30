@@ -430,6 +430,26 @@
               <FilePath>..\..\bsp\bsp_board.h</FilePath>
             </File>
             <File>
+              <FileName>bsp_watchdog.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\bsp\bsp_watchdog.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_watchdog.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\bsp\bsp_watchdog.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_buzzer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\bsp\bsp_buzzer.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_buzzer.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\bsp\bsp_buzzer.h</FilePath>
+            </File>
+            <File>
               <FileName>bsp_encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\bsp\bsp_encoder.c</FilePath>
@@ -448,6 +468,16 @@
               <FileName>bsp_key.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\bsp\bsp_key.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_led.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\bsp\bsp_led.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_led.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\bsp\bsp_led.h</FilePath>
             </File>
             <File>
               <FileName>bsp_motor.c</FileName>
@@ -600,6 +630,16 @@
               <FilePath>..\..\app\app_chassis.h</FilePath>
             </File>
             <File>
+              <FileName>app_watchdog.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\app\app_watchdog.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_watchdog.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\app\app_watchdog.h</FilePath>
+            </File>
+            <File>
               <FileName>app_oled_task.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\app\app_oled_task.c</FilePath>
@@ -608,6 +648,16 @@
               <FileName>app_oled_task.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\app\app_oled_task.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_task_state_machine.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\app\app_task_state_machine.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_task_state_machine.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\app\app_task_state_machine.h</FilePath>
             </File>
             <File>
               <FileName>app_ZDT_task.c</FileName>

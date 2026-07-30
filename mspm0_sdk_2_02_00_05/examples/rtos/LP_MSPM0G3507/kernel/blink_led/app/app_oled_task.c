@@ -15,6 +15,8 @@
 
 #include "app_oled_task.h"
 #include "app_chassis.h"
+#include "bsp_buzzer.h"
+#include "bsp_key.h"
 #include "bsp_oled.h"
 #include "bsp_track.h"
 
@@ -26,8 +28,8 @@
  * ============================================================ */
 void oled_display_task(void *pvParameters)
 {
-    const chassis_move_t *chassis =
-        (const chassis_move_t *)pvParameters;
+    chassis_move_t *chassis = (chassis_move_t *)pvParameters;
+    uint8_t data_refresh_divider = 0U;
 
     if (chassis == NULL) {
         vTaskDelete(NULL);
@@ -38,28 +40,53 @@ void oled_display_task(void *pvParameters)
     OLED_Clear();
 
     while (1) {
-        uint8_t track = bsp_track_read();
+        char key_display = ' ';
 
-        oled_printf(1, 1, "TRK:%u%u%u%u%u%u%u%u    ",
-                    (unsigned int) ((track >> 0U) & 1U),
-                    (unsigned int) ((track >> 1U) & 1U),
-                    (unsigned int) ((track >> 2U) & 1U),
-                    (unsigned int) ((track >> 3U) & 1U),
-                    (unsigned int) ((track >> 4U) & 1U),
-                    (unsigned int) ((track >> 5U) & 1U),
-                    (unsigned int) ((track >> 6U) & 1U),
-                    (unsigned int) ((track >> 7U) & 1U));
+        app_watchdog_task_heartbeat(&chassis->watchdog,
+                                    APP_WATCHDOG_TASK_OLED);
 
-        oled_printf(2, 1, "L:%5.1f R:%5.1f",
-                    (double)chassis->motor[0].speed,
-                    (double)chassis->motor[1].speed);
+        if (bsp_key_is_pressed(BSP_KEY_FRONT)) {
+            key_display = '1';
+        } else if (bsp_key_is_pressed(BSP_KEY_BACK)) {
+            key_display = '2';
+        } else if (bsp_key_is_pressed(BSP_KEY_LEFT_PHYSICAL)) {
+            key_display = '3';
+        } else if (bsp_key_is_pressed(BSP_KEY_RIGHT_PHYSICAL)) {
+            key_display = '4';
+        } else if (bsp_key_is_pressed(BSP_KEY_MIDDLE)) {
+            key_display = '5';
+        }
+        bsp_buzzer_set(key_display != ' ');
 
-        oled_printf(3, 1, "R:%4.1f P:%4.1f",
-                    (double)chassis->imu.roll,
-                    (double)chassis->imu.pitch);
-        oled_printf(4, 1, "Y:%5.1f",
-                    (double)chassis->imu.yaw);
+        if (data_refresh_divider == 0U) {
+            uint8_t track = bsp_track_read();
 
-        vTaskDelay(pdMS_TO_TICKS(200));
+            oled_printf(1, 1, "TRK:%u%u%u%u%u%u%u%u    ",
+                        (unsigned int) ((track >> 0U) & 1U),
+                        (unsigned int) ((track >> 1U) & 1U),
+                        (unsigned int) ((track >> 2U) & 1U),
+                        (unsigned int) ((track >> 3U) & 1U),
+                        (unsigned int) ((track >> 4U) & 1U),
+                        (unsigned int) ((track >> 5U) & 1U),
+                        (unsigned int) ((track >> 6U) & 1U),
+                        (unsigned int) ((track >> 7U) & 1U));
+
+            oled_printf(2, 1, "L:%5.1f R:%5.1f",
+                        (double)chassis->motor[0].speed,
+                        (double)chassis->motor[1].speed);
+
+            oled_printf(3, 1, "R:%4.1f P:%4.1f",
+                        (double)chassis->imu.roll,
+                        (double)chassis->imu.pitch);
+            oled_printf(4, 1, "Y:%5.1f",
+                        (double)chassis->imu.yaw);
+        }
+        OLED_ShowChar(1, 16, key_display);
+
+        data_refresh_divider++;
+        if (data_refresh_divider >= 4U) {
+            data_refresh_divider = 0U;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }

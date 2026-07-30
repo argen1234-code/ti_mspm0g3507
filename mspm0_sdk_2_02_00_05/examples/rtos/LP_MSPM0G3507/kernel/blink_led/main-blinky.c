@@ -66,6 +66,7 @@
 /* App includes */
 #include "app_chassis.h"
 #include "app_oled_task.h"
+#include "app_watchdog.h"
 #include "app_ZDT_task.h"
 #include "bsp_track.h"
 
@@ -85,6 +86,7 @@
 
 /* Keep PA31/C1 electrically disconnected while the tracking board powers up. */
 #define TRACK_C1_STARTUP_DELAY_MS         (3000U)
+#define WATCHDOG_MONITOR_PERIOD_MS         (500U)
 
 /* Task creation diagnostics. pdPASS means allocation succeeded. */
 volatile BaseType_t g_chassis_task_create_result = pdFAIL;
@@ -109,12 +111,13 @@ void main_blinky(void)
      * to start, and prevents UART/IMU initialization from delaying it.
      */
     bsp_track_init();
+    app_watchdog_init(&chassis_move.watchdog);
 
     /* 创建 defaultTask */
     g_default_task_create_result = xTaskCreate(DefaultTask,
                 "defaultTask",
                 DEFAULT_TASK_STACK_SIZE,
-                NULL,
+                &chassis_move,
                 DEFAULT_TASK_PRIORITY,
                 NULL);
 
@@ -153,13 +156,20 @@ void main_blinky(void)
 
 static void DefaultTask(void *pvParameters)
 {
-    (void)pvParameters;
+    chassis_move_t *chassis = (chassis_move_t *)pvParameters;
+
+    if (chassis == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
 
     vTaskDelay(pdMS_TO_TICKS(TRACK_C1_STARTUP_DELAY_MS));
     bsp_track_enable_c1_pullup();
 
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1));
+        app_watchdog_monitor(&chassis->watchdog,
+                             chassis->zdt.task_heartbeat);
+        vTaskDelay(pdMS_TO_TICKS(WATCHDOG_MONITOR_PERIOD_MS));
     }
 }
 /*-----------------------------------------------------------*/

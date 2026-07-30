@@ -5,6 +5,8 @@
 #include "bsp_jy61s.h"
 #include "bsp_uart.h"
 #include "bsp_ZDT.h"
+#include "app_task_state_machine.h"
+#include "app_watchdog.h"
 #include "pid.h"
 
 #define chassis_board_task 1
@@ -180,6 +182,8 @@ typedef struct {
 
     jy61s_data_t     imu;            /* JY61S/JY61P 标准帧, UART3 接收 */
     chassis_zdt_t    zdt;            /* X42S脉冲/串口对象及运行状态 */
+    app_task_state_machine_t task_state; /* Competition task state/timer */
+    app_watchdog_t watchdog;         /* WWDT multi-task health monitor */
 
     volatile int32_t *encoder_cnt[2]; /* 指向 g_encoderA_cnt / g_encoderB_cnt */
     int32_t           encoder_last[2]; /* 上一周期计数 (计算增量 δ) */
@@ -195,11 +199,12 @@ typedef struct {
 extern chassis_move_t chassis_move;
 extern void chassis_task(void *pvParameters);
 
-extern void chassis_mode_change(chassis_move_t *chassis);
+extern void chassis_task_change(chassis_move_t *chassis);
 extern void chassis_feedback_update(chassis_move_t *chassis);
 extern void chassis_ball_position_control(chassis_move_t *chassis);
 extern void chassis_set_control(chassis_move_t *chassis);
 extern void chassis_control_loop(chassis_move_t *chassis);
 extern void chassis_send_cmd(chassis_move_t *chassis);
+extern void chassis_task1_finish(chassis_move_t *chassis);
 
 #endif

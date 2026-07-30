@@ -13,6 +13,13 @@ typedef enum {
     BSP_KEY_COUNT
 } bsp_key_id_t;
 
+/* PCB physical orientation verified by the OLED key test. */
+#define BSP_KEY_FRONT  BSP_KEY_DOWN
+#define BSP_KEY_BACK   BSP_KEY_UP
+#define BSP_KEY_LEFT_PHYSICAL  BSP_KEY_RIGHT
+#define BSP_KEY_RIGHT_PHYSICAL BSP_KEY_LEFT
+#define BSP_KEY_MIDDLE BSP_KEY_CENTER
+
 void bsp_key_init(void);
 void bsp_key_update(void);
 bool bsp_key_is_pressed(bsp_key_id_t key);
