@@ -36,9 +36,29 @@
 #define BALL_POSITION_PID_MAX_OUT_DEG          \
     (APP_ZDT_ANGLE_UPPER_DEG - APP_ZDT_ANGLE_LOWER_DEG)
 #define BALL_POSITION_PID_MAX_IOUT             (100.0f)
-#define BALL_VELOCITY_DAMPING_DEG_PER_CM_S     (0.00f)
+
+/* Position/velocity coupled recovery trajectory. */
+#define BALL_VELOCITY_PID_KP                    (0.175f)
+#define BALL_VELOCITY_PID_KI                    (0.0f)
+#define BALL_VELOCITY_PID_KD                    (0.0f)
+#define BALL_VELOCITY_PID_MAX_OUT_DEG           (12.0f)
+#define BALL_VELOCITY_PID_MAX_IOUT              (0.0f)
+#define BALL_TRAJECTORY_MAX_SPEED_CM_S          (28.0f)
+#define BALL_TRAJECTORY_ACCEL_CM_S2             (80.0f)
+#define BALL_TRAJECTORY_BRAKE_ACCEL_CM_S2       (100.0f)
+#define BALL_OVERLIMIT_POSITION_CM              (4.0f)
+#define BALL_OVERLIMIT_ACCEL_CM_S2              (120.0f)
+#define BALL_OUTER_BRAKE_START_POSITION_CM      (6.0f)
+#define BALL_OUTER_BRAKE_TARGET_SPEED_CM_S      (20.0f)
+#define BALL_OUTER_BRAKE_ACCEL_CM_S2            (200.0f)
+#define BALL_OUTER_BRAKE_POSITION_PID_SCALE     (0.15f)
+#define BALL_POSITION_PREDICTION_TIME_S         (0.025f)
+#define BALL_VELOCITY_FILTER_ALPHA              (0.60f)
+#define BALL_POSITION_DEADBAND_CM               (0.20f)
+#define BALL_VELOCITY_DEADBAND_CM_S             (0.50f)
+#define BALL_ACCELERATION_FEEDFORWARD_DEG_PER_CM_S2 (0.01f)
 /* Added on the PID side; -2.0 deg produces the verified +2.0 deg motor trim. */
-#define BALL_MECHANICAL_COMPENSATION_DEG        (-0.0f)
+#define BALL_MECHANICAL_COMPENSATION_DEG        (-3.1f)
 #define BALL_CAMERA_TIMEOUT_MS                 (300U)
 
 /* Reverse this sign if the first hardware test drives the ball away. */
@@ -70,6 +90,13 @@ typedef enum {
     ZDT_SWEEP_FAULT_TIMEOUT,
     ZDT_SWEEP_FAULT_COMMAND
 } zdt_sweep_fault_t;
+
+typedef enum {
+    BALL_CONTROL_PHASE_HOLD = 0,
+    BALL_CONTROL_PHASE_RECOVER,
+    BALL_CONTROL_PHASE_BRAKE,
+    BALL_CONTROL_PHASE_OVERLIMIT
+} ball_control_phase_t;
 
 typedef struct {
     zdt_motor_t pulse_motor;
@@ -103,12 +130,21 @@ typedef struct {
 
 typedef struct {
     PID_t position_pid;
+    PID_t velocity_pid;
     float target_position_cm;
     float position_error_cm;
     float measured_position_cm;
     float measured_velocity_cm_s;
+    float filtered_velocity_cm_s;
+    float predicted_position_cm;
+    float target_velocity_cm_s;
+    float velocity_error_cm_s;
+    float stopping_distance_cm;
+    float desired_acceleration_cm_s2;
     float pid_output_degrees;
-    float velocity_damping_degrees;
+    float position_pid_applied_degrees;
+    float velocity_pid_output_degrees;
+    float acceleration_feedforward_degrees;
     float mechanical_compensation_degrees;
     /* Actuator neutral reference; never derived from the safety-range midpoint. */
     float motor_neutral_degrees;
@@ -119,6 +155,10 @@ typedef struct {
     bool enabled;
     bool camera_online;
     bool motor_neutral_captured;
+    bool velocity_filter_initialized;
+    bool moving_away_from_center;
+    bool outer_fast_brake_active;
+    ball_control_phase_t control_phase;
 } chassis_ball_control_t;
 
 /* ============================================================

@@ -27,8 +27,8 @@
 #define APP_ZDT_UART_PULSES_PER_REVOLUTION     (3200U)
 
 /* Fast visual-balance control; independent from the slow sweep test. */
-#define APP_ZDT_BALANCE_SPEED_RPM               (50U)
-#define APP_ZDT_BALANCE_ACCELERATION            (50U)
+#define APP_ZDT_BALANCE_SPEED_RPM               (100U)
+#define APP_ZDT_BALANCE_ACCELERATION            (100U)
 
 /* Automatic UART sweep test: 240 <-> 335 degrees. */
 #ifndef APP_ZDT_UART_SWEEP_TEST_ENABLE

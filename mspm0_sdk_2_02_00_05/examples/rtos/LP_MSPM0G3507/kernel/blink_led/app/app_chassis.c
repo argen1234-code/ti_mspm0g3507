@@ -36,6 +36,7 @@
 #include "bsp_track.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include <math.h>
 
 /* 全局唯一的底盘实例, 所有任务通过 extern 引用此实例读写状态 */
 chassis_move_t chassis_move = {0};
@@ -91,6 +92,28 @@ static void chassis_pid_reset(PID_t *pid)
     pid->D_error = 0.0f;
 }
 
+static void chassis_ball_dynamic_reset(chassis_ball_control_t *ball)
+{
+    if (ball == NULL) return;
+
+    chassis_pid_reset(&ball->position_pid);
+    chassis_pid_reset(&ball->velocity_pid);
+    ball->filtered_velocity_cm_s = 0.0f;
+    ball->predicted_position_cm = 0.0f;
+    ball->target_velocity_cm_s = 0.0f;
+    ball->velocity_error_cm_s = 0.0f;
+    ball->stopping_distance_cm = 0.0f;
+    ball->desired_acceleration_cm_s2 = 0.0f;
+    ball->pid_output_degrees = 0.0f;
+    ball->position_pid_applied_degrees = 0.0f;
+    ball->velocity_pid_output_degrees = 0.0f;
+    ball->acceleration_feedforward_degrees = 0.0f;
+    ball->velocity_filter_initialized = false;
+    ball->moving_away_from_center = false;
+    ball->outer_fast_brake_active = false;
+    ball->control_phase = BALL_CONTROL_PHASE_HOLD;
+}
+
 static void chassis_zdt_publish_position_target(chassis_move_t *chassis,
                                                 float target_degrees)
 {
@@ -121,6 +144,11 @@ static void chassis_init(chassis_move_t *chassis)
         BALL_POSITION_PID_KP,
         BALL_POSITION_PID_KI,
         BALL_POSITION_PID_KD
+    };
+    const static float ball_velocity_pid_param[3] = {
+        BALL_VELOCITY_PID_KP,
+        BALL_VELOCITY_PID_KI,
+        BALL_VELOCITY_PID_KD
     };
     const static float speed_pid_param[3] = {
         MOTOR_SPEED_PID_KP,   /* 200.0f 比例增益 */
@@ -158,12 +186,15 @@ static void chassis_init(chassis_move_t *chassis)
              ball_position_pid_param,
              BALL_POSITION_PID_MAX_OUT_DEG,
              BALL_POSITION_PID_MAX_IOUT);
+    PID_init(&chassis->ball.velocity_pid,
+             PID_POSITION,
+             ball_velocity_pid_param,
+             BALL_VELOCITY_PID_MAX_OUT_DEG,
+             BALL_VELOCITY_PID_MAX_IOUT);
     chassis->ball.target_position_cm = BALL_POSITION_TARGET_CM;
     chassis->ball.position_error_cm = 0.0f;
     chassis->ball.measured_position_cm = 0.0f;
     chassis->ball.measured_velocity_cm_s = 0.0f;
-    chassis->ball.pid_output_degrees = 0.0f;
-    chassis->ball.velocity_damping_degrees = 0.0f;
     chassis->ball.mechanical_compensation_degrees =
         BALL_MECHANICAL_COMPENSATION_DEG;
     chassis->ball.motor_neutral_degrees = 0.0f;
@@ -174,6 +205,7 @@ static void chassis_init(chassis_move_t *chassis)
     chassis->ball.enabled = true;
     chassis->ball.camera_online = false;
     chassis->ball.motor_neutral_captured = false;
+    chassis_ball_dynamic_reset(&chassis->ball);
 
     chassis->zdt.position_control_enabled = false;
     chassis->zdt.position_waiting_feedback = false;
@@ -293,7 +325,7 @@ void chassis_ball_position_control(chassis_move_t *chassis)
 
     if (!ball->enabled) {
         ball->camera_online = false;
-        chassis_pid_reset(&ball->position_pid);
+        chassis_ball_dynamic_reset(ball);
         return;
     }
 
@@ -319,7 +351,9 @@ void chassis_ball_position_control(chassis_move_t *chassis)
 
     camera_sequence = chassis->camera.sequence;
     if (camera_sequence != ball->last_camera_sequence) {
-        float pid_output;
+        float distance_cm;
+        float target_speed_magnitude_cm_s;
+        float position_sign;
         float correction_degrees;
         float correction_min_degrees;
         float correction_max_degrees;
@@ -335,19 +369,106 @@ void chassis_ball_position_control(chassis_move_t *chassis)
         ball->position_error_cm = ball->target_position_cm -
                                   ball->measured_position_cm;
 
-        pid_output = PID_Calculate(&ball->position_pid,
-                                   ball->measured_position_cm,
-                                   ball->target_position_cm);
-        ball->pid_output_degrees = pid_output;
-        ball->velocity_damping_degrees =
-            BALL_VELOCITY_DAMPING_DEG_PER_CM_S *
-            ball->measured_velocity_cm_s;
+        if (!ball->velocity_filter_initialized) {
+            ball->filtered_velocity_cm_s = ball->measured_velocity_cm_s;
+            ball->velocity_filter_initialized = true;
+        } else {
+            ball->filtered_velocity_cm_s =
+                BALL_VELOCITY_FILTER_ALPHA * ball->filtered_velocity_cm_s +
+                (1.0f - BALL_VELOCITY_FILTER_ALPHA) *
+                    ball->measured_velocity_cm_s;
+        }
 
-        /* Conventional PID uses target-measured. Negating it makes a
-         * positive camera position command a positive motor correction. */
+        ball->predicted_position_cm = chassis_clampf(
+            ball->measured_position_cm +
+                ball->filtered_velocity_cm_s *
+                    BALL_POSITION_PREDICTION_TIME_S,
+            BSP_CAMERA_POSITION_MIN_CM,
+            BSP_CAMERA_POSITION_MAX_CM);
+        distance_cm = fabsf(ball->predicted_position_cm -
+                            ball->target_position_cm);
+        position_sign = (ball->predicted_position_cm >=
+                         ball->target_position_cm) ? 1.0f : -1.0f;
+        ball->moving_away_from_center =
+            ((ball->predicted_position_cm - ball->target_position_cm) *
+             ball->filtered_velocity_cm_s) > 0.0f;
+        ball->stopping_distance_cm =
+            (ball->filtered_velocity_cm_s *
+             ball->filtered_velocity_cm_s) /
+            (2.0f * BALL_TRAJECTORY_BRAKE_ACCEL_CM_S2);
+
+        target_speed_magnitude_cm_s =
+            sqrtf(2.0f * BALL_TRAJECTORY_BRAKE_ACCEL_CM_S2 * distance_cm);
+        target_speed_magnitude_cm_s = chassis_clampf(
+            target_speed_magnitude_cm_s,
+            0.0f,
+            BALL_TRAJECTORY_MAX_SPEED_CM_S);
+        ball->target_velocity_cm_s =
+            -position_sign * target_speed_magnitude_cm_s;
+        ball->outer_fast_brake_active = false;
+
+        if ((distance_cm <= BALL_POSITION_DEADBAND_CM) &&
+            (fabsf(ball->filtered_velocity_cm_s) <=
+             BALL_VELOCITY_DEADBAND_CM_S)) {
+            ball->control_phase = BALL_CONTROL_PHASE_HOLD;
+            ball->target_velocity_cm_s = 0.0f;
+            ball->desired_acceleration_cm_s2 = 0.0f;
+        } else if ((!ball->moving_away_from_center) &&
+                   (distance_cm >= BALL_OVERLIMIT_POSITION_CM) &&
+                   (distance_cm <= BALL_OUTER_BRAKE_START_POSITION_CM) &&
+                   (fabsf(ball->filtered_velocity_cm_s) >
+                    BALL_OUTER_BRAKE_TARGET_SPEED_CM_S)) {
+            ball->control_phase = BALL_CONTROL_PHASE_BRAKE;
+            ball->outer_fast_brake_active = true;
+            ball->target_velocity_cm_s =
+                -position_sign * BALL_OUTER_BRAKE_TARGET_SPEED_CM_S;
+            ball->desired_acceleration_cm_s2 =
+                (ball->filtered_velocity_cm_s >= 0.0f) ?
+                    -BALL_OUTER_BRAKE_ACCEL_CM_S2 :
+                     BALL_OUTER_BRAKE_ACCEL_CM_S2;
+        } else if ((!ball->moving_away_from_center) &&
+                   (ball->stopping_distance_cm >= distance_cm)) {
+            ball->control_phase = BALL_CONTROL_PHASE_BRAKE;
+            ball->desired_acceleration_cm_s2 =
+                (ball->filtered_velocity_cm_s >= 0.0f) ?
+                    -BALL_TRAJECTORY_BRAKE_ACCEL_CM_S2 :
+                     BALL_TRAJECTORY_BRAKE_ACCEL_CM_S2;
+        } else if (distance_cm >= BALL_OVERLIMIT_POSITION_CM) {
+            ball->control_phase = BALL_CONTROL_PHASE_OVERLIMIT;
+            ball->desired_acceleration_cm_s2 =
+                -position_sign * BALL_OVERLIMIT_ACCEL_CM_S2;
+        } else {
+            ball->control_phase = BALL_CONTROL_PHASE_RECOVER;
+            ball->desired_acceleration_cm_s2 =
+                -position_sign * BALL_TRAJECTORY_ACCEL_CM_S2;
+        }
+
+        ball->velocity_error_cm_s = ball->target_velocity_cm_s -
+                                    ball->filtered_velocity_cm_s;
+        ball->pid_output_degrees = PID_Calculate(
+            &ball->position_pid,
+            ball->predicted_position_cm,
+            ball->target_position_cm);
+        ball->position_pid_applied_degrees = ball->pid_output_degrees;
+        if (ball->outer_fast_brake_active) {
+            ball->position_pid_applied_degrees *=
+                BALL_OUTER_BRAKE_POSITION_PID_SCALE;
+        }
+        ball->velocity_pid_output_degrees = PID_Calculate(
+            &ball->velocity_pid,
+            ball->filtered_velocity_cm_s,
+            ball->target_velocity_cm_s);
+        ball->acceleration_feedforward_degrees =
+            BALL_ACCELERATION_FEEDFORWARD_DEG_PER_CM_S2 *
+            ball->desired_acceleration_cm_s2;
+
+        /* motor_neutral_degrees is deliberately excluded from both PIDs.
+         * It is used only after the coupled correction has been calculated. */
         correction_degrees = BALL_CONTROL_DIRECTION_SIGN *
-            (-(pid_output + ball->mechanical_compensation_degrees) +
-             ball->velocity_damping_degrees);
+            (-(ball->position_pid_applied_degrees +
+               ball->mechanical_compensation_degrees) -
+             ball->velocity_pid_output_degrees -
+             ball->acceleration_feedforward_degrees);
 
         /* Camera 0.0 cm is the only balance center. These two values merely
          * convert the mechanical safety endpoints into allowable actuator
@@ -379,7 +500,7 @@ void chassis_ball_position_control(chassis_move_t *chassis)
         /* Vision loss fails safe to the mechanical neutral angle. */
         ball->camera_online = false;
         ball->motor_target_degrees = ball->motor_neutral_degrees;
-        chassis_pid_reset(&ball->position_pid);
+        chassis_ball_dynamic_reset(ball);
         chassis_zdt_publish_position_target(
             chassis, ball->motor_target_degrees);
     }
